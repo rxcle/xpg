@@ -1,14 +1,15 @@
-use std::{ffi::c_void, sync::Once};
+use std::ffi::c_void;
 
 use windows::{
     core::{w, Result, HSTRING, PCWSTR},
     Win32::{
         Foundation::*,
         Graphics::Gdi::{
-            BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextA, EndPaint, FillRect,
+            BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect,
             RedrawWindow, SelectObject, SetBkMode, SetTextColor, CLIP_DEFAULT_PRECIS,
             DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER, DT_SINGLELINE, DT_VCENTER, HBRUSH, HDC,
-            HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT, RDW_INVALIDATE, TRANSPARENT,
+            HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT, RDW_INVALIDATE, RDW_UPDATENOW,
+            TRANSPARENT,
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
@@ -18,20 +19,24 @@ use windows::{
     },
 };
 
-static REGISTER_WINDOW_CLASS: Once = Once::new();
 const WINDOW_CLASS_NAME: PCWSTR = w!("rxcle-tinitime");
 const IDT_TIMER: usize = 1;
 const IDH_HOTKEY: i32 = 100;
 
-const WIN_WIDTH: i32 = 80;
+const DEF_TIME: i32 = 1500;
+
+const WIN_WIDTH: i32 = 70;
 const WIN_HEIGHT: i32 = 25;
 
 pub struct Window {
     handle: HWND,
     font: HFONT,
     fgbrush: HBRUSH,
-    time_left: u32,
-    active: bool,
+    fgactive_brush: HBRUSH,
+    fgstopped_brush: HBRUSH,
+    time_left: i32,
+    timer_active: bool,
+    window_active: bool,
 }
 
 impl Window {
@@ -39,44 +44,43 @@ impl Window {
         unsafe {
             let instance = GetModuleHandleW(None)?;
 
-            REGISTER_WINDOW_CLASS.call_once(|| {
-                let wc = WNDCLASSW {
-                    hCursor: LoadCursorW(None, IDC_ARROW).ok().unwrap(),
-                    hInstance: instance.into(),
-                    lpszClassName: WINDOW_CLASS_NAME,
-                    style: CS_HREDRAW | CS_VREDRAW,
-                    lpfnWndProc: Some(Self::wnd_proc),
-                    ..Default::default()
-                };
-                let atom = RegisterClassW(&wc);
-                debug_assert!(atom != 0);
-            });
+            let wc = WNDCLASSW {
+                hCursor: LoadCursorW(None, IDC_ARROW).ok().unwrap(),
+                hInstance: instance.into(),
+                lpszClassName: WINDOW_CLASS_NAME,
+                style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
+                lpfnWndProc: Some(Self::wnd_proc),
+                ..Default::default()
+            };
+            let atom = RegisterClassW(&wc);
+            debug_assert!(atom != 0);
 
             let mut result = Box::new(Self {
                 handle: HWND::default(),
                 font: HFONT::default(),
                 fgbrush: HBRUSH::default(),
-                time_left: 1500,
-                active: false,
+                fgactive_brush: HBRUSH::default(),
+                fgstopped_brush: HBRUSH::default(),
+                time_left: DEF_TIME,
+                timer_active: false,
+                window_active: false,
             });
 
             let hinstance: HINSTANCE = instance.into();
             let hwnd = CreateWindowExW(
-                WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_PALETTEWINDOW,
+                WS_EX_TOPMOST | WS_EX_PALETTEWINDOW,
                 WINDOW_CLASS_NAME,
                 &HSTRING::from(title),
                 WS_POPUP | WS_VISIBLE,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                80,
-                25,
+                WIN_WIDTH,
+                WIN_HEIGHT,
                 None,
                 None,
                 Some(hinstance),
                 Some(result.as_mut() as *mut _ as _),
             )?;
-
-            let _ = SetLayeredWindowAttributes(hwnd, COLORREF::default(), 180, LWA_ALPHA);
 
             let mut window_rect = RECT::default();
             let _ = SystemParametersInfoW(
@@ -118,14 +122,14 @@ impl Window {
             CLIP_DEFAULT_PRECIS,
             DEFAULT_QUALITY,
             0,
-            w!("Consolas"),
+            w!("Segoe UI Symbol"),
         );
         self.fgbrush = CreateSolidBrush(COLORREF(0x00FFFFFF));
+        self.fgactive_brush = CreateSolidBrush(COLORREF(0x00D7792B));
+        self.fgstopped_brush = CreateSolidBrush(COLORREF(0x002B31D7));
 
-        self.start_timer();
-
-        //let result = RegisterHotKey(Some(self.handle), IDH_HOTKEY, MOD_CONTROL, VK_F12.0 as u32);
-        //println!("RegisterHotKey result: {:?}", result);
+        let result = RegisterHotKey(Some(self.handle), IDH_HOTKEY, MOD_CONTROL, VK_F12.0 as u32);
+        println!("RegisterHotKey result: {:?}", result);
     }
 
     unsafe fn destroy_window(&mut self) {
@@ -135,29 +139,112 @@ impl Window {
         self.font = HFONT::default();
         _ = DeleteObject(HGDIOBJ::from(self.fgbrush));
         self.fgbrush = HBRUSH::default();
+        _ = DeleteObject(HGDIOBJ::from(self.fgactive_brush));
+        self.fgactive_brush = HBRUSH::default();
     }
 
     unsafe fn paint(&mut self, ps: PAINTSTRUCT, rp: *mut RECT, hdc: HDC) {
-        FillRect(hdc, &ps.rcPaint, self.fgbrush);
+        let (bg, fg) = if self.window_active {
+            (self.fgactive_brush, COLORREF(0x00FFFFFF))
+        } else {
+            if self.timer_active {
+                (self.fgbrush, COLORREF(0x00000000))
+            } else {
+                (self.fgstopped_brush, COLORREF(0x00FFFFFF))
+            }
+        };
+        FillRect(hdc, &ps.rcPaint, bg);
 
         SelectObject(hdc, HGDIOBJ::from(self.font));
-        SetTextColor(hdc, COLORREF(0x00000000));
+        SetTextColor(hdc, fg);
         SetBkMode(hdc, TRANSPARENT);
 
         let minutes = self.time_left / 60;
         let seconds = self.time_left % 60;
-        let mut time_left_str = format!("{:02}:{:02}", minutes, seconds);
+        let mut time_left_str: Vec<u16> = format!("{:0}:{:02}", minutes, seconds)
+            .encode_utf16()
+            .collect();
 
-        DrawTextA(
+        let mut rtime = RECT {
+            left: (*rp).left + 15,
+            top: (*rp).top,
+            right: (*rp).right,
+            bottom: (*rp).bottom,
+        };
+
+        DrawTextW(
             hdc,
-            time_left_str.as_bytes_mut(),
-            rp,
-            DT_SINGLELINE | DT_CENTER | DT_VCENTER,
+            time_left_str.as_mut_slice(),
+            &mut rtime,
+            DT_SINGLELINE | DT_VCENTER | DT_CENTER,
+        );
+
+        let state_str = if self.timer_active {
+            "\u{E102}"
+        } else {
+            "\u{E103}"
+        };
+        let mut state_symbol: Vec<u16> = state_str.encode_utf16().collect();
+
+        let mut ricon = RECT {
+            left: (*rp).left,
+            top: (*rp).top,
+            right: 15,
+            bottom: (*rp).bottom,
+        };
+
+        DrawTextW(
+            hdc,
+            &mut state_symbol.as_mut_slice(),
+            &mut ricon,
+            DT_SINGLELINE | DT_VCENTER,
         );
     }
 
+    unsafe fn activate_window(&mut self, activate: bool) {
+        self.window_active = activate;
+        self.refresh();
+    }
+
     unsafe fn start_timer(&mut self) {
-        let _ = SetTimer(Some(self.handle), IDT_TIMER, 1000, None);
+        if self.timer_active {
+            self.stop_timer();
+        }
+        self.timer_active = true;
+        _ = SetTimer(Some(self.handle), IDT_TIMER, 1000, None);
+        self.update_timer(DEF_TIME);
+    }
+
+    unsafe fn stop_timer(&mut self) {
+        let _ = KillTimer(Some(self.handle), IDT_TIMER);
+        self.timer_active = false;
+        self.update_timer(DEF_TIME);
+    }
+
+    unsafe fn toggle_timer(&mut self) {
+        if self.timer_active {
+            self.stop_timer();
+        } else {
+            self.start_timer();
+        }
+    }
+
+    unsafe fn update_timer(&mut self, new_time: i32) {
+        if new_time < 0 {
+            self.stop_timer();
+        } else {
+            self.time_left = new_time;
+            self.refresh();
+        }
+    }
+
+    unsafe fn refresh(&mut self) {
+        _ = RedrawWindow(
+            Some(self.handle),
+            None,
+            None,
+            RDW_INVALIDATE | RDW_UPDATENOW,
+        );
     }
 
     unsafe fn message_handler(&mut self, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -166,14 +253,16 @@ impl Window {
                 self.destroy_window();
                 LRESULT(0)
             }
+            WM_ACTIVATE => {
+                self.activate_window(wparam.0 > 0);
+                LRESULT(0)
+            }
             WM_HOTKEY => {
-                println!("Hotkey pressed!");
-                self.start_timer();
+                self.toggle_timer();
                 LRESULT(0)
             }
             WM_TIMER => {
-                self.time_left = self.time_left - 1;
-                _ = RedrawWindow(Some(self.handle), None, None, RDW_INVALIDATE);
+                self.update_timer(self.time_left - 1);
                 LRESULT(0)
             }
             WM_PAINT => {
@@ -192,6 +281,10 @@ impl Window {
                 } else {
                     result
                 };
+            }
+            WM_NCLBUTTONDBLCLK => {
+                self.toggle_timer();
+                LRESULT(0)
             }
             _ => DefWindowProcW(self.handle, message, wparam, lparam),
         }
