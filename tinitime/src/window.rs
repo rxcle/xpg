@@ -19,7 +19,7 @@ use windows::{
     },
 };
 
-const WINDOW_CLASS_NAME: PCWSTR = w!("rxcle-tinitime");
+const WINDOW_CLASS_NAME: PCWSTR = w!("rxcle.tinitime.wc");
 const IDT_TIMER: usize = 1;
 const IDH_HOTKEY: i32 = 100;
 
@@ -27,6 +27,8 @@ const DEF_TIME: i32 = 1500;
 
 const WIN_WIDTH: i32 = 70;
 const WIN_HEIGHT: i32 = 25;
+
+const X_WM_RESET: u32 = WM_APP + 1;
 
 pub struct Window {
     handle: HWND,
@@ -40,6 +42,19 @@ pub struct Window {
 }
 
 impl Window {
+    pub fn is_running() -> bool {
+        unsafe {
+            let r = FindWindowW(WINDOW_CLASS_NAME, None);
+            if let Ok(hwnd) = r {
+                _ = SetForegroundWindow(hwnd);
+                _ = SendMessageA(hwnd, X_WM_RESET, WPARAM(0), LPARAM(0));
+                true
+            } else {
+                false
+            }
+        }
+    }
+
     pub fn new(title: &str) -> Result<Box<Self>> {
         unsafe {
             let instance = GetModuleHandleW(None)?;
@@ -55,7 +70,7 @@ impl Window {
             let atom = RegisterClassW(&wc);
             debug_assert!(atom != 0);
 
-            let mut result = Box::new(Self {
+            let mut window = Box::new(Self {
                 handle: HWND::default(),
                 font: HFONT::default(),
                 fgbrush: HBRUSH::default(),
@@ -67,7 +82,7 @@ impl Window {
             });
 
             let hinstance: HINSTANCE = instance.into();
-            let hwnd = CreateWindowExW(
+            _ = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_PALETTEWINDOW,
                 WINDOW_CLASS_NAME,
                 &HSTRING::from(title),
@@ -79,30 +94,12 @@ impl Window {
                 None,
                 None,
                 Some(hinstance),
-                Some(result.as_mut() as *mut _ as _),
+                Some(window.as_mut() as *mut _ as _),
             )?;
 
-            let mut window_rect = RECT::default();
-            let _ = SystemParametersInfoW(
-                SPI_GETWORKAREA,
-                0,
-                Some(&mut window_rect as *mut _ as *mut c_void),
-                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-            );
+            window.reset();
 
-            let _ = SetWindowPos(
-                hwnd,
-                None,
-                window_rect.right - WIN_WIDTH,
-                window_rect.bottom - WIN_HEIGHT,
-                0,
-                0,
-                SWP_NOSIZE,
-            );
-
-            _ = ShowWindow(hwnd, SW_SHOW);
-
-            Ok(result)
+            Ok(window)
         }
     }
 
@@ -129,7 +126,7 @@ impl Window {
         self.fgstopped_brush = CreateSolidBrush(COLORREF(0x002B31D7));
 
         let result = RegisterHotKey(Some(self.handle), IDH_HOTKEY, MOD_CONTROL, VK_F12.0 as u32);
-        println!("RegisterHotKey result: {:?}", result);
+        println!("Hotkey registered: {:?}", result.is_ok());
     }
 
     unsafe fn destroy_window(&mut self) {
@@ -146,12 +143,10 @@ impl Window {
     unsafe fn paint(&mut self, ps: PAINTSTRUCT, rp: *mut RECT, hdc: HDC) {
         let (bg, fg) = if self.window_active {
             (self.fgactive_brush, COLORREF(0x00FFFFFF))
+        } else if self.timer_active {
+            (self.fgbrush, COLORREF(0x00000000))
         } else {
-            if self.timer_active {
-                (self.fgbrush, COLORREF(0x00000000))
-            } else {
-                (self.fgstopped_brush, COLORREF(0x00FFFFFF))
-            }
+            (self.fgstopped_brush, COLORREF(0x00FFFFFF))
         };
         FillRect(hdc, &ps.rcPaint, bg);
 
@@ -195,10 +190,34 @@ impl Window {
 
         DrawTextW(
             hdc,
-            &mut state_symbol.as_mut_slice(),
+            state_symbol.as_mut_slice(),
             &mut ricon,
             DT_SINGLELINE | DT_VCENTER,
         );
+    }
+
+    unsafe fn reset(&mut self) {
+        self.stop_timer();
+
+        let mut window_rect = RECT::default();
+        let _ = SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            Some(&mut window_rect as *mut _ as *mut c_void),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+
+        let _ = SetWindowPos(
+            self.handle,
+            None,
+            window_rect.right - WIN_WIDTH,
+            window_rect.bottom - WIN_HEIGHT,
+            0,
+            0,
+            SWP_NOSIZE,
+        );
+
+        _ = ShowWindow(self.handle, SW_SHOW);
     }
 
     unsafe fn activate_window(&mut self, activate: bool) {
@@ -249,6 +268,10 @@ impl Window {
 
     unsafe fn message_handler(&mut self, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         match message {
+            X_WM_RESET => {
+                self.reset();
+                LRESULT(0)
+            }
             WM_DESTROY => {
                 self.destroy_window();
                 LRESULT(0)
@@ -276,11 +299,11 @@ impl Window {
             }
             WM_NCHITTEST => {
                 let result = DefWindowProcW(self.handle, message, wparam, lparam);
-                return if result.0 == HTCLIENT as isize {
+                if result.0 == HTCLIENT as isize {
                     LRESULT(HTCAPTION as isize)
                 } else {
                     result
-                };
+                }
             }
             WM_NCLBUTTONDBLCLK => {
                 self.toggle_timer();
