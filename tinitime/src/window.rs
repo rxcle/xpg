@@ -205,7 +205,11 @@ impl Window {
 
     unsafe fn reset(&mut self) {
         self.stop_timer();
+        self.reset_pos();
+        _ = ShowWindow(self.handle, SW_SHOW);
+    }
 
+    unsafe fn reset_pos(&mut self) {
         let mut window_rect = RECT::default();
         let _ = SystemParametersInfoW(
             SPI_GETWORKAREA,
@@ -217,14 +221,12 @@ impl Window {
         let _ = SetWindowPos(
             self.handle,
             None,
-            window_rect.right - WIN_WIDTH,
-            window_rect.bottom - WIN_HEIGHT,
+            window_rect.right - WIN_WIDTH - 5,
+            window_rect.bottom - WIN_HEIGHT - 5,
             0,
             0,
             SWP_NOSIZE,
         );
-
-        _ = ShowWindow(self.handle, SW_SHOW);
     }
 
     unsafe fn activate_window(&mut self, activate: bool) {
@@ -310,6 +312,10 @@ impl Window {
                 } else {
                     result
                 }
+            }
+            WM_NCRBUTTONDOWN => {
+                self.reset_pos();
+                LRESULT(0)
             }
             WM_NCLBUTTONDBLCLK => {
                 self.toggle_timer();
