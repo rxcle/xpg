@@ -14,10 +14,10 @@ fn main() {
     }
     println!("tinitime v{}", version);
 
-    if Window::is_running() {
-        println!("already active, switching");
-        return;
-    }
+    // if Window::is_running() {
+    //     println!("already active, switching");
+    //     return;
+    // }
 
     let result = run();
     if let Err(error) = result {

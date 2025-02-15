@@ -39,6 +39,7 @@ pub struct Window {
     time_left: i32,
     timer_active: bool,
     window_active: bool,
+    client_rect: RECT,
 }
 
 impl Window {
@@ -79,6 +80,12 @@ impl Window {
                 time_left: DEF_TIME,
                 timer_active: false,
                 window_active: false,
+                client_rect: RECT {
+                    left: 0,
+                    top: 0,
+                    right: WIN_WIDTH,
+                    bottom: WIN_HEIGHT,
+                },
             });
 
             let hinstance: HINSTANCE = instance.into();
@@ -140,7 +147,7 @@ impl Window {
         self.fgactive_brush = HBRUSH::default();
     }
 
-    unsafe fn paint(&mut self, ps: PAINTSTRUCT, rp: *mut RECT, hdc: HDC) {
+    unsafe fn paint(&mut self, ps: PAINTSTRUCT, hdc: HDC) {
         let (bg, fg) = if self.window_active {
             (self.fgactive_brush, COLORREF(0x00FFFFFF))
         } else if self.timer_active {
@@ -161,10 +168,10 @@ impl Window {
             .collect();
 
         let mut rtime = RECT {
-            left: (*rp).left + 15,
-            top: (*rp).top,
-            right: (*rp).right,
-            bottom: (*rp).bottom,
+            left: self.client_rect.left + 15,
+            top: self.client_rect.top,
+            right: self.client_rect.right,
+            bottom: self.client_rect.bottom,
         };
 
         DrawTextW(
@@ -182,10 +189,10 @@ impl Window {
         let mut state_symbol: Vec<u16> = state_str.encode_utf16().collect();
 
         let mut ricon = RECT {
-            left: (*rp).left,
-            top: (*rp).top,
+            left: self.client_rect.left,
+            top: self.client_rect.top,
             right: 15,
-            bottom: (*rp).bottom,
+            bottom: self.client_rect.bottom,
         };
 
         DrawTextW(
@@ -291,9 +298,8 @@ impl Window {
             WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
                 let psp = &mut ps as *mut PAINTSTRUCT;
-                let rp = &mut ps.rcPaint as *mut RECT;
                 let hdc = BeginPaint(self.handle, psp);
-                self.paint(ps, rp, hdc);
+                self.paint(ps, hdc);
                 _ = EndPaint(self.handle, &ps);
                 LRESULT(0)
             }
