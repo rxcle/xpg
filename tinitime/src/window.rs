@@ -281,6 +281,10 @@ impl Window {
                 self.reset();
                 LRESULT(0)
             }
+            WM_QUERYENDSESSION => {
+                self.destroy_window();
+                LRESULT(1)
+            }
             WM_DESTROY => {
                 self.destroy_window();
                 LRESULT(0)
