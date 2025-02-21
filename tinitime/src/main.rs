@@ -2,7 +2,6 @@
 
 mod window;
 
-use std::mem::MaybeUninit;
 use std::ptr::null_mut;
 
 use window::Window;

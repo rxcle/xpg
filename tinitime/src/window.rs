@@ -6,12 +6,11 @@ use windows::{
         Foundation::*,
         Graphics::{
             Gdi::{
-                BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW,
-                EndPaint, FillRect, GetStockObject, Rectangle, RedrawWindow, SelectObject,
-                SetBkMode, SetTextColor, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_QUALITY,
-                DT_CENTER, DT_SINGLELINE, DT_VCENTER, HBRUSH, HDC, HFONT, HGDIOBJ, HPEN,
-                NULL_BRUSH, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, RDW_INVALIDATE,
-                RDW_UPDATENOW, TRANSPARENT,
+                BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
+                FillRect, GetStockObject, RedrawWindow, SelectObject, SetBkMode, SetTextColor,
+                CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER, DT_SINGLELINE,
+                DT_VCENTER, HBRUSH, HDC, HFONT, HGDIOBJ, NULL_BRUSH, OUT_DEFAULT_PRECIS,
+                PAINTSTRUCT, RDW_INVALIDATE, RDW_UPDATENOW, TRANSPARENT,
             },
             GdiPlus::{
                 GdipCreateFromHDC, GdipCreatePen1, GdipDeleteGraphics, GdipDeletePen,
@@ -38,7 +37,6 @@ const WIN_HEIGHT: i32 = 25;
 pub struct Window {
     handle: HWND,
     font: HFONT,
-    pen: HPEN,
     fgbrush: HBRUSH,
     fgactive_brush: HBRUSH,
     fgstopped_brush: HBRUSH,
@@ -67,7 +65,6 @@ impl Window {
             let mut window = Box::new(Self {
                 handle: HWND::default(),
                 font: HFONT::default(),
-                pen: HPEN::default(),
                 fgbrush: HBRUSH::default(),
                 fgactive_brush: HBRUSH::default(),
                 fgstopped_brush: HBRUSH::default(),
@@ -124,7 +121,6 @@ impl Window {
             0,
             w!("Segoe UI Symbol"),
         );
-        self.pen = CreatePen(PS_SOLID, 1, COLORREF(0x00F0F0F0));
         self.fgbrush = CreateSolidBrush(COLORREF(0x00FFFFFF));
         self.fgactive_brush = CreateSolidBrush(COLORREF(0x00D7792B));
         self.fgstopped_brush = CreateSolidBrush(COLORREF(0x002B31D7));
@@ -137,8 +133,6 @@ impl Window {
         self.handle = HWND::default();
         _ = DeleteObject(HGDIOBJ::from(self.font));
         self.font = HFONT::default();
-        _ = DeleteObject(HGDIOBJ::from(self.pen));
-        self.pen = HPEN::default();
         _ = DeleteObject(HGDIOBJ::from(self.fgbrush));
         self.fgbrush = HBRUSH::default();
         _ = DeleteObject(HGDIOBJ::from(self.fgactive_brush));
@@ -160,8 +154,6 @@ impl Window {
         SetBkMode(hdc, TRANSPARENT);
 
         SelectObject(hdc, GetStockObject(NULL_BRUSH));
-        SelectObject(hdc, HGDIOBJ::from(self.pen));
-        // _ = Rectangle(hdc, 0, 0, self.client_rect.right, self.client_rect.bottom);
 
         let minutes = self.time_left / 60;
         let seconds = self.time_left % 60;
