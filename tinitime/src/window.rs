@@ -1,15 +1,22 @@
-use std::ffi::c_void;
+use std::{ffi::c_void, ptr::null_mut};
 
 use windows::{
     core::{w, Result, HSTRING, PCWSTR},
     Win32::{
         Foundation::*,
-        Graphics::Gdi::{
-            BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect,
-            RedrawWindow, SelectObject, SetBkMode, SetTextColor, CLIP_DEFAULT_PRECIS,
-            DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER, DT_SINGLELINE, DT_VCENTER, HBRUSH, HDC,
-            HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT, RDW_INVALIDATE, RDW_UPDATENOW,
-            TRANSPARENT,
+        Graphics::{
+            Gdi::{
+                BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW,
+                EndPaint, FillRect, GetStockObject, Rectangle, RedrawWindow, SelectObject,
+                SetBkMode, SetTextColor, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_QUALITY,
+                DT_CENTER, DT_SINGLELINE, DT_VCENTER, HBRUSH, HDC, HFONT, HGDIOBJ, HPEN,
+                NULL_BRUSH, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, RDW_INVALIDATE,
+                RDW_UPDATENOW, TRANSPARENT,
+            },
+            GdiPlus::{
+                GdipCreateFromHDC, GdipCreatePen1, GdipDeleteGraphics, GdipDeletePen,
+                GdipDrawRectangleI, GpGraphics, GpPen, UnitPixel,
+            },
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
@@ -25,14 +32,13 @@ const IDH_HOTKEY: i32 = 100;
 
 const DEF_TIME: i32 = 1500;
 
-const WIN_WIDTH: i32 = 70;
+const WIN_WIDTH: i32 = 68;
 const WIN_HEIGHT: i32 = 25;
-
-const X_WM_RESET: u32 = WM_APP + 1;
 
 pub struct Window {
     handle: HWND,
     font: HFONT,
+    pen: HPEN,
     fgbrush: HBRUSH,
     fgactive_brush: HBRUSH,
     fgstopped_brush: HBRUSH,
@@ -43,19 +49,6 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn is_running() -> bool {
-        unsafe {
-            let r = FindWindowW(WINDOW_CLASS_NAME, None);
-            if let Ok(hwnd) = r {
-                _ = SetForegroundWindow(hwnd);
-                _ = SendMessageA(hwnd, X_WM_RESET, WPARAM(0), LPARAM(0));
-                true
-            } else {
-                false
-            }
-        }
-    }
-
     pub fn new(title: &str) -> Result<Box<Self>> {
         unsafe {
             let instance = GetModuleHandleW(None)?;
@@ -74,6 +67,7 @@ impl Window {
             let mut window = Box::new(Self {
                 handle: HWND::default(),
                 font: HFONT::default(),
+                pen: HPEN::default(),
                 fgbrush: HBRUSH::default(),
                 fgactive_brush: HBRUSH::default(),
                 fgstopped_brush: HBRUSH::default(),
@@ -89,8 +83,8 @@ impl Window {
             });
 
             let hinstance: HINSTANCE = instance.into();
-            _ = CreateWindowExW(
-                WS_EX_TOPMOST | WS_EX_PALETTEWINDOW,
+            let handle = CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_PALETTEWINDOW | WS_EX_LAYERED,
                 WINDOW_CLASS_NAME,
                 &HSTRING::from(title),
                 WS_POPUP | WS_VISIBLE,
@@ -103,6 +97,8 @@ impl Window {
                 Some(hinstance),
                 Some(window.as_mut() as *mut _ as _),
             )?;
+
+            _ = SetLayeredWindowAttributes(handle, COLORREF::default(), 230, LWA_ALPHA);
 
             window.reset();
 
@@ -128,12 +124,12 @@ impl Window {
             0,
             w!("Segoe UI Symbol"),
         );
+        self.pen = CreatePen(PS_SOLID, 1, COLORREF(0x00F0F0F0));
         self.fgbrush = CreateSolidBrush(COLORREF(0x00FFFFFF));
         self.fgactive_brush = CreateSolidBrush(COLORREF(0x00D7792B));
         self.fgstopped_brush = CreateSolidBrush(COLORREF(0x002B31D7));
 
-        let result = RegisterHotKey(Some(self.handle), IDH_HOTKEY, MOD_CONTROL, VK_F12.0 as u32);
-        println!("Hotkey registered: {:?}", result.is_ok());
+        _ = RegisterHotKey(Some(self.handle), IDH_HOTKEY, MOD_CONTROL, VK_F12.0 as u32);
     }
 
     unsafe fn destroy_window(&mut self) {
@@ -141,6 +137,8 @@ impl Window {
         self.handle = HWND::default();
         _ = DeleteObject(HGDIOBJ::from(self.font));
         self.font = HFONT::default();
+        _ = DeleteObject(HGDIOBJ::from(self.pen));
+        self.pen = HPEN::default();
         _ = DeleteObject(HGDIOBJ::from(self.fgbrush));
         self.fgbrush = HBRUSH::default();
         _ = DeleteObject(HGDIOBJ::from(self.fgactive_brush));
@@ -160,6 +158,10 @@ impl Window {
         SelectObject(hdc, HGDIOBJ::from(self.font));
         SetTextColor(hdc, fg);
         SetBkMode(hdc, TRANSPARENT);
+
+        SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        SelectObject(hdc, HGDIOBJ::from(self.pen));
+        // _ = Rectangle(hdc, 0, 0, self.client_rect.right, self.client_rect.bottom);
 
         let minutes = self.time_left / 60;
         let seconds = self.time_left % 60;
@@ -201,6 +203,28 @@ impl Window {
             &mut ricon,
             DT_SINGLELINE | DT_VCENTER,
         );
+
+        let mut graphics: *mut GpGraphics = null_mut();
+        GdipCreateFromHDC(hdc, &mut graphics);
+
+        let grey: u32 = (0x30 << 24) | (0x00 << 16) | (0x00 << 8) | 0x00;
+        let mut pen: *mut GpPen = null_mut();
+        GdipCreatePen1(grey, 1.0, UnitPixel, &mut pen);
+
+        // Draw rectangle at (10,10) with width 100 and height 50.
+        GdipDrawRectangleI(
+            graphics,
+            pen,
+            0,
+            0,
+            self.client_rect.right - 1,
+            self.client_rect.bottom - 1,
+        );
+
+        // Cleanup
+        GdipDeletePen(pen);
+
+        GdipDeleteGraphics(graphics);
     }
 
     unsafe fn reset(&mut self) {
@@ -277,10 +301,6 @@ impl Window {
 
     unsafe fn message_handler(&mut self, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         match message {
-            X_WM_RESET => {
-                self.reset();
-                LRESULT(0)
-            }
             WM_QUERYENDSESSION => {
                 self.destroy_window();
                 LRESULT(1)
@@ -309,6 +329,7 @@ impl Window {
                 _ = EndPaint(self.handle, &ps);
                 LRESULT(0)
             }
+            WM_ERASEBKGND => LRESULT(1),
             WM_NCHITTEST => {
                 let result = DefWindowProcW(self.handle, message, wparam, lparam);
                 if result.0 == HTCLIENT as isize {

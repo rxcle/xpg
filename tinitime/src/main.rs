@@ -2,26 +2,39 @@
 
 mod window;
 
-use window::Window;
+use std::mem::MaybeUninit;
+use std::ptr::null_mut;
 
+use window::Window;
 use windows::core::Result;
-use windows::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+use windows::Win32::Graphics::GdiPlus;
+use windows::Win32::Graphics::GdiPlus::GdiplusShutdown;
+use windows::Win32::Graphics::GdiPlus::GdiplusStartup;
+use windows::Win32::Graphics::GdiPlus::GdiplusStartupInput;
 
 fn main() {
-    let version = env!("CARGO_PKG_VERSION");
-    unsafe {
-        _ = AttachConsole(ATTACH_PARENT_PROCESS);
-    }
-    println!("tinitime v{}", version);
+    let mut gdiplus_token = 0;
 
-    if Window::is_running() {
-        println!("already active, switching");
-        return;
-    }
+    let status = unsafe {
+        GdiplusStartup(
+            &mut gdiplus_token,
+            &GdiplusStartupInput {
+                GdiplusVersion: 1,
+                ..Default::default()
+            },
+            null_mut(),
+        )
+    };
+
+    assert_eq!(status, GdiPlus::Ok);
 
     let result = run();
     if let Err(error) = result {
         error.code().unwrap();
+    }
+
+    unsafe {
+        GdiplusShutdown(gdiplus_token);
     }
 }
 
