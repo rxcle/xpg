@@ -1,4 +1,4 @@
-use std::ffi::c_void;
+use std::ffi::{c_void, CStr};
 
 use windows::{
     core::{w, Result, HSTRING, PCWSTR},
@@ -19,7 +19,7 @@ use windows::{
             },
         },
         System::LibraryLoader::GetModuleHandleW,
-        UI::WindowsAndMessaging::*,
+        UI::{Input::KeyboardAndMouse::GetKeyNameTextA, WindowsAndMessaging::*},
     },
 };
 
@@ -155,7 +155,7 @@ impl Window {
         SetTextColor(hdc, fg);
         SetBkMode(hdc, TRANSPARENT);
 
-        let mut time_left_str: Vec<u16> = "F12".encode_utf16().collect();
+        let mut time_left_str: Vec<u16> = "˃".encode_utf16().collect();
 
         let mut rtime = RECT {
             left: self.client_rect.left,
@@ -225,16 +225,7 @@ impl Window {
                 self.activate_window(wparam.0 > 0);
                 LRESULT(0)
             }
-            WM_ERASEBKGND => {
-                // let mut rect = RECT::default();
-                // _ = GetClientRect(self.handle, &mut rect);
-                // FillRect(
-                //     HDC(wparam.0 as *mut _),
-                //     &rect,
-                //     CreateSolidBrush(COLORREF(0x00FF00FF)),
-                // );
-                LRESULT(0)
-            }
+            WM_ERASEBKGND => LRESULT(1),
             WM_PAINT => {
                 let mut ps = PAINTSTRUCT::default();
                 let psp = &mut ps as *mut PAINTSTRUCT;
@@ -243,16 +234,31 @@ impl Window {
                 _ = EndPaint(self.handle, &ps);
                 LRESULT(0)
             }
-            WM_NCHITTEST => {
-                let result = DefWindowProcW(self.handle, message, wparam, lparam);
-                if result.0 == HTCLIENT as isize {
-                    LRESULT(HTCAPTION as isize)
-                } else {
-                    result
+            WM_KEYDOWN | WM_SYSKEYDOWN => {
+                // Check bit 30: if set, it's a repeat.
+                if ((lparam.0 >> 30) & 1) != 0 {
+                    return LRESULT(0);
                 }
-            }
-            WM_NCRBUTTONDOWN => {
-                self.reset_pos();
+                // Extract the virtual key code (wParam)
+                let _vk_code = wparam.0 as u32;
+                // Extract the scan code from lParam
+                let mut scan_code = ((lparam.0 >> 16) & 0xFF) as u32;
+                // If the key is extended, set the extended flag.
+                if (lparam.0 & (1 << 24)) != 0 {
+                    scan_code |= 0x100;
+                }
+                // GetKeyNameText expects the scan code in the upper 16 bits.
+                let lparam_for_key_name = (scan_code << 16) as i32;
+                let mut key_name_buf = [0u8; 128];
+                let ret = GetKeyNameTextA(lparam_for_key_name, &mut key_name_buf);
+                if ret > 0 {
+                    // Convert the returned C-string to a Rust string.
+                    if let Ok(cstr) = CStr::from_bytes_with_nul(&key_name_buf[..ret as usize + 1]) {
+                        if let Ok(key_name) = cstr.to_str() {
+                            println!("Key pressed: {}", key_name);
+                        }
+                    }
+                }
                 LRESULT(0)
             }
             _ => DefWindowProcW(self.handle, message, wparam, lparam),
