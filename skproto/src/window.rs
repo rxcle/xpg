@@ -12,20 +12,23 @@ use windows::{
             },
             Gdi::{
                 BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
-                FillRect, RedrawWindow, SelectObject, SetBkMode, SetTextColor, CLIP_DEFAULT_PRECIS,
-                DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER, DT_SINGLELINE, DT_VCENTER, HBRUSH,
-                HDC, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT, RDW_INVALIDATE,
-                RDW_UPDATENOW, TRANSPARENT,
+                FillRect, InvalidateRect, RedrawWindow, SelectObject, SetBkMode, SetTextColor,
+                UpdateWindow, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
+                DT_SINGLELINE, DT_VCENTER, HBRUSH, HDC, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS,
+                PAINTSTRUCT, RDW_INVALIDATE, RDW_UPDATENOW, TRANSPARENT,
             },
         },
         System::LibraryLoader::GetModuleHandleW,
-        UI::{Input::KeyboardAndMouse::GetKeyNameTextA, WindowsAndMessaging::*},
+        UI::{
+            Input::KeyboardAndMouse::{GetKeyNameTextA, VIRTUAL_KEY, VK_F12},
+            WindowsAndMessaging::*,
+        },
     },
 };
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("rxcle.skproto.wc");
 
-const WIN_WIDTH: i32 = 40;
+const WIN_WIDTH: i32 = 100;
 const WIN_HEIGHT: i32 = 25;
 
 pub struct Window {
@@ -36,6 +39,7 @@ pub struct Window {
     fgstopped_brush: HBRUSH,
     window_active: bool,
     client_rect: RECT,
+    keys: Vec<String>,
 }
 
 impl Window {
@@ -67,6 +71,7 @@ impl Window {
                     right: WIN_WIDTH,
                     bottom: WIN_HEIGHT,
                 },
+                keys: vec![],
             });
 
             let hinstance: HINSTANCE = instance.into();
@@ -155,7 +160,11 @@ impl Window {
         SetTextColor(hdc, fg);
         SetBkMode(hdc, TRANSPARENT);
 
-        let mut time_left_str: Vec<u16> = "˃".encode_utf16().collect();
+        let mut time_left_str: Vec<u16> = "Hello".encode_utf16().collect();
+        let last_key = self.keys.last();
+        if let Some(a) = last_key {
+            time_left_str = a.encode_utf16().collect();
+        }
 
         let mut rtime = RECT {
             left: self.client_rect.left,
@@ -202,13 +211,17 @@ impl Window {
         self.refresh();
     }
 
-    unsafe fn refresh(&mut self) {
-        _ = RedrawWindow(
-            Some(self.handle),
-            None,
-            None,
-            RDW_INVALIDATE | RDW_UPDATENOW,
-        );
+    fn refresh(&mut self) {
+        unsafe {
+            _ = InvalidateRect(Some(self.handle), None, false);
+            _ = UpdateWindow(self.handle);
+        }
+    }
+
+    fn handle_key(&mut self, scan_code: u32, name: &str) {
+        println!("Key pressed: {}, {}", scan_code, name);
+        self.keys.push(String::from(name));
+        self.refresh();
     }
 
     unsafe fn message_handler(&mut self, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -255,7 +268,7 @@ impl Window {
                     // Convert the returned C-string to a Rust string.
                     if let Ok(cstr) = CStr::from_bytes_with_nul(&key_name_buf[..ret as usize + 1]) {
                         if let Ok(key_name) = cstr.to_str() {
-                            println!("Key pressed: {}", key_name);
+                            self.handle_key(scan_code, key_name);
                         }
                     }
                 }
