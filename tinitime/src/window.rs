@@ -1,3 +1,5 @@
+#![allow(unused_must_use)]
+
 use std::{ffi::c_void, ptr::null_mut};
 
 use windows::{
@@ -6,11 +8,12 @@ use windows::{
         Foundation::*,
         Graphics::{
             Gdi::{
-                BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
-                FillRect, GetStockObject, RedrawWindow, SelectObject, SetBkMode, SetTextColor,
+                BeginPaint, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
+                CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect,
+                GetStockObject, RedrawWindow, SelectObject, SetBkMode, SetTextColor,
                 CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER, DT_SINGLELINE,
                 DT_VCENTER, HBRUSH, HDC, HFONT, HGDIOBJ, NULL_BRUSH, OUT_DEFAULT_PRECIS,
-                PAINTSTRUCT, RDW_INVALIDATE, RDW_UPDATENOW, TRANSPARENT,
+                PAINTSTRUCT, RDW_INVALIDATE, RDW_UPDATENOW, SRCCOPY, TRANSPARENT,
             },
             GdiPlus::{
                 GdipCreateFromHDC, GdipCreatePen1, GdipDeleteGraphics, GdipDeletePen,
@@ -95,8 +98,9 @@ impl Window {
                 Some(window.as_mut() as *mut _ as _),
             )?;
 
-            _ = SetLayeredWindowAttributes(handle, COLORREF::default(), 230, LWA_ALPHA);
+            SetLayeredWindowAttributes(handle, COLORREF::default(), 230, LWA_ALPHA);
 
+            window.init_window(handle);
             window.reset();
 
             Ok(window)
@@ -125,21 +129,28 @@ impl Window {
         self.fgactive_brush = CreateSolidBrush(COLORREF(0x00D7792B));
         self.fgstopped_brush = CreateSolidBrush(COLORREF(0x002B31D7));
 
-        _ = RegisterHotKey(Some(self.handle), IDH_HOTKEY, MOD_CONTROL, VK_F12.0 as u32);
+        RegisterHotKey(Some(self.handle), IDH_HOTKEY, MOD_CONTROL, VK_F12.0 as u32);
     }
 
     unsafe fn destroy_window(&mut self) {
         PostQuitMessage(0);
         self.handle = HWND::default();
-        _ = DeleteObject(HGDIOBJ::from(self.font));
+        DeleteObject(HGDIOBJ::from(self.font));
         self.font = HFONT::default();
-        _ = DeleteObject(HGDIOBJ::from(self.fgbrush));
+        DeleteObject(HGDIOBJ::from(self.fgbrush));
         self.fgbrush = HBRUSH::default();
-        _ = DeleteObject(HGDIOBJ::from(self.fgactive_brush));
+        DeleteObject(HGDIOBJ::from(self.fgactive_brush));
         self.fgactive_brush = HBRUSH::default();
     }
 
     unsafe fn paint(&mut self, ps: PAINTSTRUCT, hdc: HDC) {
+        let width = self.client_rect.right - self.client_rect.left;
+        let height = self.client_rect.bottom - self.client_rect.top;
+
+        let mem_dc = CreateCompatibleDC(Some(hdc));
+        let mem_bitmap = CreateCompatibleBitmap(hdc, width, height);
+        let old_bitmap = SelectObject(mem_dc, mem_bitmap.into());
+
         let (bg, fg) = if self.window_active {
             (self.fgactive_brush, COLORREF(0x00FFFFFF))
         } else if self.timer_active {
@@ -147,13 +158,13 @@ impl Window {
         } else {
             (self.fgstopped_brush, COLORREF(0x00FFFFFF))
         };
-        FillRect(hdc, &ps.rcPaint, bg);
+        FillRect(mem_dc, &ps.rcPaint, bg);
 
-        SelectObject(hdc, HGDIOBJ::from(self.font));
-        SetTextColor(hdc, fg);
-        SetBkMode(hdc, TRANSPARENT);
+        SelectObject(mem_dc, HGDIOBJ::from(self.font));
+        SetTextColor(mem_dc, fg);
+        SetBkMode(mem_dc, TRANSPARENT);
 
-        SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        SelectObject(mem_dc, GetStockObject(NULL_BRUSH));
 
         let minutes = self.time_left / 60;
         let seconds = self.time_left % 60;
@@ -169,7 +180,7 @@ impl Window {
         };
 
         DrawTextW(
-            hdc,
+            mem_dc,
             time_left_str.as_mut_slice(),
             &mut rtime,
             DT_SINGLELINE | DT_VCENTER | DT_CENTER,
@@ -190,14 +201,14 @@ impl Window {
         };
 
         DrawTextW(
-            hdc,
+            mem_dc,
             state_symbol.as_mut_slice(),
             &mut ricon,
             DT_SINGLELINE | DT_VCENTER,
         );
 
         let mut graphics: *mut GpGraphics = null_mut();
-        GdipCreateFromHDC(hdc, &mut graphics);
+        GdipCreateFromHDC(mem_dc, &mut graphics);
 
         let grey: u32 = (0x30 << 24) | (0x00 << 16) | (0x00 << 8) | 0x00;
         let mut pen: *mut GpPen = null_mut();
@@ -213,28 +224,42 @@ impl Window {
             self.client_rect.bottom - 1,
         );
 
+        windows::Win32::Graphics::Gdi::BitBlt(
+            hdc,
+            0,
+            0,
+            width,
+            height,
+            Some(mem_dc),
+            0,
+            0,
+            SRCCOPY,
+        );
+
         // Cleanup
         GdipDeletePen(pen);
-
         GdipDeleteGraphics(graphics);
+        SelectObject(mem_dc, old_bitmap);
+        DeleteObject(mem_bitmap.into());
+        DeleteDC(mem_dc);
     }
 
     unsafe fn reset(&mut self) {
         self.stop_timer();
         self.reset_pos();
-        _ = ShowWindow(self.handle, SW_SHOW);
+        ShowWindow(self.handle, SW_SHOW);
     }
 
     unsafe fn reset_pos(&mut self) {
         let mut window_rect = RECT::default();
-        let _ = SystemParametersInfoW(
+        SystemParametersInfoW(
             SPI_GETWORKAREA,
             0,
             Some(&mut window_rect as *mut _ as *mut c_void),
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
         );
 
-        let _ = SetWindowPos(
+        SetWindowPos(
             self.handle,
             None,
             window_rect.right - WIN_WIDTH - 5,
@@ -255,12 +280,12 @@ impl Window {
             self.stop_timer();
         }
         self.timer_active = true;
-        _ = SetTimer(Some(self.handle), IDT_TIMER, 1000, None);
+        SetTimer(Some(self.handle), IDT_TIMER, 1000, None);
         self.update_timer(DEF_TIME);
     }
 
     unsafe fn stop_timer(&mut self) {
-        let _ = KillTimer(Some(self.handle), IDT_TIMER);
+        KillTimer(Some(self.handle), IDT_TIMER);
         self.timer_active = false;
         self.update_timer(DEF_TIME);
     }
@@ -283,7 +308,7 @@ impl Window {
     }
 
     unsafe fn refresh(&mut self) {
-        _ = RedrawWindow(
+        RedrawWindow(
             Some(self.handle),
             None,
             None,
@@ -318,7 +343,7 @@ impl Window {
                 let psp = &mut ps as *mut PAINTSTRUCT;
                 let hdc = BeginPaint(self.handle, psp);
                 self.paint(ps, hdc);
-                _ = EndPaint(self.handle, &ps);
+                EndPaint(self.handle, &ps);
                 LRESULT(0)
             }
             WM_ERASEBKGND => LRESULT(1),
@@ -349,9 +374,8 @@ impl Window {
         lparam: LPARAM,
     ) -> LRESULT {
         if message == WM_NCCREATE {
-            let cs = lparam.0 as *const CREATESTRUCTW;
+            let cs: *const CREATESTRUCTW = lparam.0 as *const CREATESTRUCTW;
             let this = (*cs).lpCreateParams as *mut Self;
-            (*this).init_window(window);
             SetWindowLongPtrW(window, GWLP_USERDATA, this as _);
         } else {
             let this = GetWindowLongPtrW(window, GWLP_USERDATA) as *mut Self;
@@ -366,7 +390,7 @@ impl Window {
         let mut message = MSG::default();
         unsafe {
             while GetMessageW(&mut message, None, 0, 0).into() {
-                _ = TranslateMessage(&message);
+                TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
         }
