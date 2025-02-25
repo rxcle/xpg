@@ -1,3 +1,5 @@
+#![allow(unused_must_use)]
+
 use std::ffi::{c_void, CStr};
 
 use windows::{
@@ -11,11 +13,12 @@ use windows::{
                 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWINDOWATTRIBUTE, DWM_WINDOW_CORNER_PREFERENCE,
             },
             Gdi::{
-                BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint,
-                FillRect, InvalidateRect, RedrawWindow, SelectObject, SetBkMode, SetTextColor,
-                UpdateWindow, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
-                DT_SINGLELINE, DT_VCENTER, HBRUSH, HDC, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS,
-                PAINTSTRUCT, RDW_INVALIDATE, RDW_UPDATENOW, TRANSPARENT,
+                BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
+                CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect,
+                InvalidateRect, RedrawWindow, SelectObject, SetBkMode, SetTextColor, UpdateWindow,
+                CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER, DT_SINGLELINE,
+                DT_VCENTER, HBRUSH, HDC, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
+                RDW_INVALIDATE, RDW_UPDATENOW, SRCCOPY, TRANSPARENT,
             },
         },
         System::LibraryLoader::GetModuleHandleW,
@@ -90,10 +93,10 @@ impl Window {
                 Some(window.as_mut() as *mut _ as _),
             )?;
 
-            _ = SetLayeredWindowAttributes(handle, COLORREF::default(), 220, LWA_ALPHA);
+            SetLayeredWindowAttributes(handle, COLORREF::default(), 220, LWA_ALPHA);
 
             let preference = DWM_WINDOW_CORNER_PREFERENCE(3);
-            _ = DwmSetWindowAttribute(
+            DwmSetWindowAttribute(
                 handle,
                 DWMWA_WINDOW_CORNER_PREFERENCE,
                 &preference as *const _ as *const c_void,
@@ -101,7 +104,7 @@ impl Window {
             );
 
             let enable = 1;
-            _ = DwmSetWindowAttribute(
+            DwmSetWindowAttribute(
                 handle,
                 DWMWA_USE_HOSTBACKDROPBRUSH,
                 &enable as *const _ as *const c_void,
@@ -140,25 +143,36 @@ impl Window {
     unsafe fn destroy_window(&mut self) {
         PostQuitMessage(0);
         self.handle = HWND::default();
-        _ = DeleteObject(HGDIOBJ::from(self.font));
+        DeleteObject(HGDIOBJ::from(self.font));
         self.font = HFONT::default();
-        _ = DeleteObject(HGDIOBJ::from(self.fgbrush));
+        DeleteObject(HGDIOBJ::from(self.fgbrush));
         self.fgbrush = HBRUSH::default();
-        _ = DeleteObject(HGDIOBJ::from(self.fgactive_brush));
+        DeleteObject(HGDIOBJ::from(self.fgactive_brush));
         self.fgactive_brush = HBRUSH::default();
     }
 
-    unsafe fn paint(&mut self, ps: PAINTSTRUCT, hdc: HDC) {
-        let (bg, fg) = if self.window_active {
-            (self.fgactive_brush, COLORREF(0x00FFFFFF))
-        } else {
-            (self.fgstopped_brush, COLORREF(0x00FFFFFF))
-        };
-        FillRect(hdc, &ps.rcPaint, bg);
+    unsafe fn paint(&mut self, hdc: HDC) {
+        let width = self.client_rect.right - self.client_rect.left;
+        let height = self.client_rect.bottom - self.client_rect.top;
 
-        SelectObject(hdc, HGDIOBJ::from(self.font));
-        SetTextColor(hdc, fg);
-        SetBkMode(hdc, TRANSPARENT);
+        let mem_dc = CreateCompatibleDC(Some(hdc));
+        let mem_bitmap = CreateCompatibleBitmap(hdc, width, height);
+        let old_bitmap = SelectObject(mem_dc, mem_bitmap.into());
+
+        let (bg, fg) = (self.fgactive_brush, COLORREF(0x00FFFFFF));
+
+        let mut rect = RECT {
+            left: self.client_rect.left,
+            top: self.client_rect.top,
+            right: self.client_rect.right,
+            bottom: self.client_rect.bottom,
+        };
+
+        FillRect(mem_dc, &rect, bg);
+
+        SelectObject(mem_dc, HGDIOBJ::from(self.font));
+        SetTextColor(mem_dc, fg);
+        SetBkMode(mem_dc, TRANSPARENT);
 
         let mut time_left_str: Vec<u16> = "Hello".encode_utf16().collect();
         let last_key = self.keys.last();
@@ -166,36 +180,36 @@ impl Window {
             time_left_str = a.encode_utf16().collect();
         }
 
-        let mut rtime = RECT {
-            left: self.client_rect.left,
-            top: self.client_rect.top,
-            right: self.client_rect.right,
-            bottom: self.client_rect.bottom,
-        };
-
         DrawTextW(
-            hdc,
+            mem_dc,
             &mut time_left_str,
-            &mut rtime,
+            &mut rect,
             DT_SINGLELINE | DT_VCENTER | DT_CENTER,
         );
+
+        BitBlt(hdc, 0, 0, width, height, Some(mem_dc), 0, 0, SRCCOPY);
+
+        // Cleanup
+        SelectObject(mem_dc, old_bitmap);
+        DeleteObject(mem_bitmap.into());
+        DeleteDC(mem_dc);
     }
 
     unsafe fn reset(&mut self) {
         self.reset_pos();
-        _ = ShowWindow(self.handle, SW_SHOW);
+        ShowWindow(self.handle, SW_SHOW);
     }
 
     unsafe fn reset_pos(&mut self) {
         let mut window_rect = RECT::default();
-        let _ = SystemParametersInfoW(
+        SystemParametersInfoW(
             SPI_GETWORKAREA,
             0,
             Some(&mut window_rect as *mut _ as *mut c_void),
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
         );
 
-        let _ = SetWindowPos(
+        SetWindowPos(
             self.handle,
             None,
             window_rect.right - WIN_WIDTH - 5,
@@ -213,8 +227,8 @@ impl Window {
 
     fn refresh(&mut self) {
         unsafe {
-            _ = InvalidateRect(Some(self.handle), None, false);
-            _ = UpdateWindow(self.handle);
+            InvalidateRect(Some(self.handle), None, false);
+            UpdateWindow(self.handle);
         }
     }
 
@@ -243,8 +257,8 @@ impl Window {
                 let mut ps = PAINTSTRUCT::default();
                 let psp = &mut ps as *mut PAINTSTRUCT;
                 let hdc = BeginPaint(self.handle, psp);
-                self.paint(ps, hdc);
-                _ = EndPaint(self.handle, &ps);
+                self.paint(hdc);
+                EndPaint(self.handle, &ps);
                 LRESULT(0)
             }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
@@ -302,7 +316,7 @@ impl Window {
         let mut message = MSG::default();
         unsafe {
             while GetMessageW(&mut message, None, 0, 0).into() {
-                _ = TranslateMessage(&message);
+                TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
         }
