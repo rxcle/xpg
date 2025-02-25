@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "tinitime"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "embed-resource",
  "windows",
