@@ -1,6 +1,6 @@
 #![allow(unused_must_use)]
 
-use std::ffi::{c_void, CStr};
+use std::ffi::{c_void, CStr, OsStr};
 
 use windows::{
     core::{w, Result, HSTRING, PCWSTR},
@@ -14,8 +14,9 @@ use windows::{
             },
             Gdi::{
                 BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
-                CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect,
-                InvalidateRect, RedrawWindow, SelectObject, SetBkMode, SetTextColor, UpdateWindow,
+                CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect, GetDC,
+                GetTextExtentPoint32A, GetTextExtentPoint32W, InvalidateRect, RedrawWindow,
+                ReleaseDC, SelectObject, SetBkMode, SetTextColor, TextOutW, UpdateWindow,
                 CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER, DT_SINGLELINE,
                 DT_VCENTER, HBRUSH, HDC, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
                 RDW_INVALIDATE, RDW_UPDATENOW, SRCCOPY, TRANSPARENT,
@@ -23,16 +24,24 @@ use windows::{
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
-            Input::KeyboardAndMouse::{GetKeyNameTextA, VIRTUAL_KEY, VK_F12},
+            Input::KeyboardAndMouse::{GetKeyNameTextA, VIRTUAL_KEY, VK_BACK, VK_ESCAPE, VK_F12},
             WindowsAndMessaging::*,
         },
     },
 };
 
+use crate::helpers::to_lpcwstr;
+
 const WINDOW_CLASS_NAME: PCWSTR = w!("rxcle.skproto.wc");
 
-const WIN_WIDTH: i32 = 100;
+const WIN_WIDTH: i32 = 200;
 const WIN_HEIGHT: i32 = 25;
+
+pub struct Key {
+    scan_code: u32,
+    name: String,
+    text_size: SIZE,
+}
 
 pub struct Window {
     handle: HWND,
@@ -42,7 +51,7 @@ pub struct Window {
     fgstopped_brush: HBRUSH,
     window_active: bool,
     client_rect: RECT,
-    keys: Vec<String>,
+    keys: Vec<Key>,
 }
 
 impl Window {
@@ -174,18 +183,11 @@ impl Window {
         SetTextColor(mem_dc, fg);
         SetBkMode(mem_dc, TRANSPARENT);
 
-        let mut time_left_str: Vec<u16> = "Hello".encode_utf16().collect();
-        let last_key = self.keys.last();
-        if let Some(a) = last_key {
-            time_left_str = a.encode_utf16().collect();
+        let mut x = 0;
+        for key in &self.keys {
+            TextOutW(mem_dc, x, 0, &to_lpcwstr(&key.name));
+            x += key.text_size.cx + 5;
         }
-
-        DrawTextW(
-            mem_dc,
-            &mut time_left_str,
-            &mut rect,
-            DT_SINGLELINE | DT_VCENTER | DT_CENTER,
-        );
 
         BitBlt(hdc, 0, 0, width, height, Some(mem_dc), 0, 0, SRCCOPY);
 
@@ -232,9 +234,33 @@ impl Window {
         }
     }
 
-    fn handle_key(&mut self, scan_code: u32, name: &str) {
+    fn measure_text(&self, text: &str) -> SIZE {
+        unsafe {
+            let mut size = SIZE::default();
+            let dc = GetDC(Some(self.handle));
+            let org_obj = SelectObject(dc, HGDIOBJ::from(self.font));
+            GetTextExtentPoint32W(dc, &to_lpcwstr(text), &mut size);
+            SelectObject(dc, org_obj);
+            ReleaseDC(Some(self.handle), dc);
+            size
+        }
+    }
+
+    fn handle_key(&mut self, scan_code: u32, vk_code: VIRTUAL_KEY, name: &str) {
         println!("Key pressed: {}, {}", scan_code, name);
-        self.keys.push(String::from(name));
+        let size = self.measure_text(name);
+        println!("Size: {:?}", size);
+        if vk_code == VK_ESCAPE {
+            self.keys.clear();
+        } else if vk_code == VK_BACK {
+            self.keys.pop();
+        } else {
+            self.keys.push(Key {
+                name: String::from(name),
+                scan_code,
+                text_size: size,
+            });
+        }
         self.refresh();
     }
 
@@ -267,7 +293,7 @@ impl Window {
                     return LRESULT(0);
                 }
                 // Extract the virtual key code (wParam)
-                let _vk_code = wparam.0 as u32;
+                let vk_code = wparam.0 as u16;
                 // Extract the scan code from lParam
                 let mut scan_code = ((lparam.0 >> 16) & 0xFF) as u32;
                 // If the key is extended, set the extended flag.
@@ -282,7 +308,7 @@ impl Window {
                     // Convert the returned C-string to a Rust string.
                     if let Ok(cstr) = CStr::from_bytes_with_nul(&key_name_buf[..ret as usize + 1]) {
                         if let Ok(key_name) = cstr.to_str() {
-                            self.handle_key(scan_code, key_name);
+                            self.handle_key(scan_code, VIRTUAL_KEY(vk_code), key_name);
                         }
                     }
                 }

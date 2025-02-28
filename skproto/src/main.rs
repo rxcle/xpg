@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod helpers;
 mod window;
 
 use window::Window;
