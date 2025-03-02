@@ -22,7 +22,7 @@ use windows::{
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
-            Input::KeyboardAndMouse::{RegisterHotKey, MOD_CONTROL, VK_F12},
+            Input::KeyboardAndMouse::{RegisterHotKey, MOD_CONTROL, VK_F1},
             WindowsAndMessaging::*,
         },
     },
@@ -84,7 +84,7 @@ impl Window {
 
             let hinstance: HINSTANCE = instance.into();
             let handle = CreateWindowExW(
-                WS_EX_TOPMOST | WS_EX_PALETTEWINDOW | WS_EX_LAYERED,
+                WS_EX_TOPMOST | WS_EX_APPWINDOW | WS_EX_LAYERED,
                 WINDOW_CLASS_NAME,
                 &HSTRING::from(title),
                 WS_POPUP | WS_VISIBLE,
@@ -129,7 +129,7 @@ impl Window {
         self.fgactive_brush = CreateSolidBrush(COLORREF(0x00D7792B));
         self.fgstopped_brush = CreateSolidBrush(COLORREF(0x002B31D7));
 
-        RegisterHotKey(Some(self.handle), IDH_HOTKEY, MOD_CONTROL, VK_F12.0 as u32);
+        RegisterHotKey(Some(self.handle), IDH_HOTKEY, MOD_CONTROL, VK_F1.0 as u32);
     }
 
     unsafe fn destroy_window(&mut self) {
@@ -214,7 +214,6 @@ impl Window {
         let mut pen: *mut GpPen = null_mut();
         GdipCreatePen1(grey, 1.0, UnitPixel, &mut pen);
 
-        // Draw rectangle at (10,10) with width 100 and height 50.
         GdipDrawRectangleI(
             graphics,
             pen,

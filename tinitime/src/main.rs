@@ -2,6 +2,7 @@
 
 mod window;
 
+use std::mem;
 use std::ptr::null_mut;
 
 use window::Window;
@@ -38,7 +39,8 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    _ = Window::new("tinitime")?;
+    let window = Window::new("tinitime")?;
     Window::run_message_loop();
+    mem::drop(window);
     Ok(())
 }
