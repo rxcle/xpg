@@ -24,24 +24,21 @@ use windows::{
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
-            Input::KeyboardAndMouse::{GetKeyNameTextA, VIRTUAL_KEY, VK_BACK, VK_ESCAPE, VK_F12},
+            Input::KeyboardAndMouse::{
+                GetKeyNameTextA, GetKeyboardLayout, MapVirtualKeyExW, MAPVK_VSC_TO_VK_EX,
+                VIRTUAL_KEY, VK_BACK, VK_ESCAPE, VK_F12,
+            },
             WindowsAndMessaging::*,
         },
     },
 };
 
-use crate::helpers::to_lpcwstr;
+use crate::helpers::{scancode_to_vk, to_lpcwstr, Key};
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("rxcle.skproto.wc");
 
 const WIN_WIDTH: i32 = 200;
 const WIN_HEIGHT: i32 = 25;
-
-pub struct Key {
-    scan_code: u32,
-    name: String,
-    text_size: SIZE,
-}
 
 pub struct Window {
     handle: HWND,
@@ -247,9 +244,9 @@ impl Window {
     }
 
     fn handle_key(&mut self, scan_code: u32, vk_code: VIRTUAL_KEY, name: &str) {
-        println!("Key pressed: {}, {}", scan_code, name);
+        println!("Key pressed: {}, {:?}, {}\n", scan_code, vk_code, name);
         let size = self.measure_text(name);
-        println!("Size: {:?}", size);
+        //println!("Size: {:?}", size);
         if vk_code == VK_ESCAPE {
             self.keys.clear();
         } else if vk_code == VK_BACK {
@@ -257,7 +254,7 @@ impl Window {
         } else {
             self.keys.push(Key {
                 name: String::from(name),
-                scan_code,
+                vk: vk_code,
                 text_size: size,
             });
         }
@@ -288,18 +285,18 @@ impl Window {
                 LRESULT(0)
             }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
-                // Check bit 30: if set, it's a repeat.
-                if ((lparam.0 >> 30) & 1) != 0 {
+                let is_repeat = ((lparam.0 >> 30) & 1) != 0;
+                if is_repeat {
                     return LRESULT(0);
                 }
-                // Extract the virtual key code (wParam)
-                let vk_code = wparam.0 as u16;
-                // Extract the scan code from lParam
+
                 let mut scan_code = ((lparam.0 >> 16) & 0xFF) as u32;
-                // If the key is extended, set the extended flag.
-                if (lparam.0 & (1 << 24)) != 0 {
+                let is_extended = lparam.0 & (1 << 24) != 0;
+                if is_extended {
                     scan_code |= 0x100;
                 }
+                let vk_code = scancode_to_vk(scan_code, VIRTUAL_KEY(wparam.0 as u16), is_extended);
+
                 // GetKeyNameText expects the scan code in the upper 16 bits.
                 let lparam_for_key_name = (scan_code << 16) as i32;
                 let mut key_name_buf = [0u8; 128];
@@ -308,7 +305,7 @@ impl Window {
                     // Convert the returned C-string to a Rust string.
                     if let Ok(cstr) = CStr::from_bytes_with_nul(&key_name_buf[..ret as usize + 1]) {
                         if let Ok(key_name) = cstr.to_str() {
-                            self.handle_key(scan_code, VIRTUAL_KEY(vk_code), key_name);
+                            self.handle_key(scan_code, vk_code, key_name);
                         }
                     }
                 }
