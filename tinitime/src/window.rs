@@ -56,6 +56,9 @@ impl Window {
 
             let wc = WNDCLASSW {
                 hCursor: LoadCursorW(None, IDC_ARROW).ok().unwrap(),
+                hIcon: LoadIconW(Some(HINSTANCE(instance.0)), w!("main"))
+                    .ok()
+                    .unwrap(),
                 hInstance: instance.into(),
                 lpszClassName: WINDOW_CLASS_NAME,
                 style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
