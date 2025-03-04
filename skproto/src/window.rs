@@ -33,7 +33,10 @@ use windows::{
     },
 };
 
-use crate::helpers::{scancode_to_vk, to_lpcwstr, Key};
+use crate::{
+    helpers::{scancode_to_vk, to_lpcwstr},
+    keys::{Key, KeyRef, Keychain, Size},
+};
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("rxcle.skproto.wc");
 
@@ -48,7 +51,7 @@ pub struct Window {
     fgstopped_brush: HBRUSH,
     window_active: bool,
     client_rect: RECT,
-    keys: Vec<Key>,
+    keychain: Keychain,
 }
 
 impl Window {
@@ -80,7 +83,7 @@ impl Window {
                     right: WIN_WIDTH,
                     bottom: WIN_HEIGHT,
                 },
-                keys: vec![],
+                keychain: Keychain::new(),
             });
 
             let hinstance: HINSTANCE = instance.into();
@@ -181,9 +184,9 @@ impl Window {
         SetBkMode(mem_dc, TRANSPARENT);
 
         let mut x = 0;
-        for key in &self.keys {
+        for key in &self.keychain.keys {
             TextOutW(mem_dc, x, 0, &to_lpcwstr(&key.name));
-            x += key.text_size.cx + 5;
+            x += key.text_size.width + 5;
         }
 
         BitBlt(hdc, 0, 0, width, height, Some(mem_dc), 0, 0, SRCCOPY);
@@ -243,17 +246,21 @@ impl Window {
         }
     }
 
-    fn handle_key(&mut self, vk_code: VIRTUAL_KEY, name: &str) {
-        let size = self.measure_text(name);
+    fn handle_key(&mut self, scan_code: u32, vk_code: VIRTUAL_KEY) {
         if vk_code == VK_ESCAPE {
-            self.keys.clear();
+            self.keychain.clear();
         } else if vk_code == VK_BACK {
-            self.keys.pop();
+            self.keychain.back();
         } else {
-            self.keys.push(Key {
-                name: String::from(name),
-                vk: vk_code,
-                text_size: size,
+            let key_name = Keychain::get_key_name(scan_code);
+            let size = self.measure_text(&key_name);
+            self.keychain.add(Key {
+                name: key_name,
+                vk: KeyRef(vk_code.0),
+                text_size: Size {
+                    width: size.cx,
+                    height: size.cy,
+                },
             });
         }
         self.refresh();
@@ -296,17 +303,7 @@ impl Window {
                 let vk_code = scancode_to_vk(scan_code, VIRTUAL_KEY(wparam.0 as u16), is_extended);
 
                 // GetKeyNameText expects the scan code in the upper 16 bits.
-                let lparam_for_key_name = (scan_code << 16) as i32;
-                let mut key_name_buf = [0u8; 128];
-                let ret = GetKeyNameTextA(lparam_for_key_name, &mut key_name_buf);
-                if ret > 0 {
-                    // Convert the returned C-string to a Rust string.
-                    if let Ok(cstr) = CStr::from_bytes_with_nul(&key_name_buf[..ret as usize + 1]) {
-                        if let Ok(key_name) = cstr.to_str() {
-                            self.handle_key(vk_code, key_name);
-                        }
-                    }
-                }
+                self.handle_key(scan_code, vk_code);
                 LRESULT(0)
             }
             _ => DefWindowProcW(self.handle, message, wparam, lparam),

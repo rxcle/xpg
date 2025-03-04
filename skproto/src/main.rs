@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod helpers;
+mod keys;
 mod program;
 mod window;
 

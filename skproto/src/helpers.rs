@@ -4,35 +4,7 @@ pub fn to_lpcwstr(s: &str) -> Vec<u16> {
     OsStr::new(s).encode_wide().collect()
 }
 
-use windows::Win32::{Foundation::SIZE, UI::Input::KeyboardAndMouse::*};
-
-pub struct Key {
-    pub vk: VIRTUAL_KEY,
-    pub name: String,
-    pub text_size: SIZE,
-}
-
-pub struct Keychain {
-    pub(crate) keys: Vec<Key>,
-}
-
-impl Keychain {
-    pub fn new() -> Self {
-        Self { keys: vec![] }
-    }
-
-    pub fn add(&mut self, key: Key) {
-        self.keys.push(key);
-    }
-
-    pub fn back(&mut self) {
-        self.keys.pop();
-    }
-
-    pub fn clear(&mut self) {
-        self.keys.clear();
-    }
-}
+use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
 pub fn scancode_to_vk(scancode: u32, input_vk: VIRTUAL_KEY, is_extended: bool) -> VIRTUAL_KEY {
     let vk = unsafe { MapVirtualKeyW(scancode, MAPVK_VSC_TO_VK_EX) as u16 };
