@@ -167,7 +167,7 @@ impl Window {
 
         let (bg, fg) = (self.fgactive_brush, COLORREF(0x00FFFFFF));
 
-        let mut rect = RECT {
+        let rect = RECT {
             left: self.client_rect.left,
             top: self.client_rect.top,
             right: self.client_rect.right,
@@ -243,10 +243,8 @@ impl Window {
         }
     }
 
-    fn handle_key(&mut self, scan_code: u32, vk_code: VIRTUAL_KEY, name: &str) {
-        println!("Key pressed: {}, {:?}, {}\n", scan_code, vk_code, name);
+    fn handle_key(&mut self, vk_code: VIRTUAL_KEY, name: &str) {
         let size = self.measure_text(name);
-        //println!("Size: {:?}", size);
         if vk_code == VK_ESCAPE {
             self.keys.clear();
         } else if vk_code == VK_BACK {
@@ -305,7 +303,7 @@ impl Window {
                     // Convert the returned C-string to a Rust string.
                     if let Ok(cstr) = CStr::from_bytes_with_nul(&key_name_buf[..ret as usize + 1]) {
                         if let Ok(key_name) = cstr.to_str() {
-                            self.handle_key(scan_code, vk_code, key_name);
+                            self.handle_key(vk_code, key_name);
                         }
                     }
                 }
@@ -333,15 +331,5 @@ impl Window {
             }
         }
         DefWindowProcW(window, message, wparam, lparam)
-    }
-
-    pub fn run_message_loop() {
-        let mut message = MSG::default();
-        unsafe {
-            while GetMessageW(&mut message, None, 0, 0).into() {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
-            }
-        }
     }
 }
