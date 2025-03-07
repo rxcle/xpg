@@ -23,19 +23,13 @@ use windows::{
             },
         },
         System::LibraryLoader::GetModuleHandleW,
-        UI::{
-            Input::KeyboardAndMouse::{
-                GetKeyNameTextA, GetKeyboardLayout, MapVirtualKeyExW, MAPVK_VSC_TO_VK_EX,
-                VIRTUAL_KEY, VK_BACK, VK_ESCAPE, VK_F12,
-            },
-            WindowsAndMessaging::*,
-        },
+        UI::WindowsAndMessaging::*,
     },
 };
 
 use crate::{
-    helpers::{scancode_to_vk, to_lpcwstr},
-    keys::{Key, KeyData, Keychain, Size},
+    helpers::to_lpcwstr,
+    keys::{Key, Keychain, ScanCode, Size, SC_BACK, SC_ESCAPE},
 };
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("rxcle.skproto.wc");
@@ -246,16 +240,17 @@ impl Window {
         }
     }
 
-    fn handle_key(&mut self, key_data: KeyData) {
-        if key_data.vk_code == VK_ESCAPE {
+    fn handle_key(&mut self, scan_code: ScanCode) {
+        println!("{:04X}", &scan_code.0);
+        if scan_code == SC_ESCAPE {
             self.keychain.clear();
-        } else if key_data.vk_code == VK_BACK {
+        } else if scan_code == SC_BACK {
             self.keychain.back();
         } else {
-            let key_name = Keychain::get_key_name(&key_data);
+            let key_name = Keychain::get_key_name(&scan_code);
             let size = self.measure_text(&key_name);
             self.keychain.add(Key {
-                key_data,
+                scan_code,
                 name: key_name,
                 text_size: Size {
                     width: size.cx,
@@ -294,14 +289,12 @@ impl Window {
                 if is_repeat {
                     return LRESULT(0);
                 }
-                let mut scan_code = ((lparam.0 >> 16) & 0xFF) as u32;
                 let is_extended = lparam.0 & (1 << 24) != 0;
+                let mut scan_code = ((lparam.0 >> 16) & 0xFF) as i32;
                 if is_extended {
                     scan_code |= 0x100;
                 }
-                let vk_code = scancode_to_vk(scan_code, VIRTUAL_KEY(wparam.0 as u16), is_extended);
-                let key_data = KeyData { scan_code, vk_code };
-                self.handle_key(key_data);
+                self.handle_key(ScanCode(scan_code));
                 LRESULT(0)
             }
             _ => DefWindowProcW(self.handle, message, wparam, lparam),

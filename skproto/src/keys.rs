@@ -3,16 +3,16 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::hash::Hash;
 
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyNameTextA, VIRTUAL_KEY};
+use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyNameTextA;
 
 #[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
 pub struct KeyRef(pub u16);
 
-#[derive(Clone)]
-pub struct KeyData {
-    pub scan_code: u32,
-    pub vk_code: VIRTUAL_KEY,
-}
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ScanCode(pub i32);
+pub const SC_ESCAPE: ScanCode = ScanCode(0x01);
+pub const SC_BACK: ScanCode = ScanCode(0x0E);
 
 #[derive(Clone, Copy)]
 pub struct Size {
@@ -22,7 +22,7 @@ pub struct Size {
 
 #[derive(Clone)]
 pub struct Key {
-    pub key_data: KeyData,
+    pub scan_code: ScanCode,
     pub name: String,
     pub text_size: Size,
 }
@@ -62,7 +62,7 @@ impl Keychain {
         // }
         self.keys.push(Key {
             name: key.name,
-            key_data: key.key_data,
+            scan_code: key.scan_code,
             text_size: Size {
                 width: key.text_size.width,
                 height: key.text_size.height,
@@ -78,8 +78,8 @@ impl Keychain {
         self.keys.clear();
     }
 
-    pub fn get_key_name(key_data: &KeyData) -> String {
-        let lparam_for_key_name = (key_data.scan_code << 16) as i32;
+    pub fn get_key_name(scan_code: &ScanCode) -> String {
+        let lparam_for_key_name = (scan_code.0 << 16) as i32;
         let mut key_name_buf = [0u8; 128];
         let ret = unsafe { GetKeyNameTextA(lparam_for_key_name, &mut key_name_buf) };
         if ret > 0 {
