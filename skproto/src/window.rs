@@ -35,7 +35,7 @@ use windows::{
 
 use crate::{
     helpers::{scancode_to_vk, to_lpcwstr},
-    keys::{Key, KeyRef, Keychain, Size},
+    keys::{Key, KeyData, Keychain, Size},
 };
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("rxcle.skproto.wc");
@@ -246,17 +246,17 @@ impl Window {
         }
     }
 
-    fn handle_key(&mut self, scan_code: u32, vk_code: VIRTUAL_KEY) {
-        if vk_code == VK_ESCAPE {
+    fn handle_key(&mut self, key_data: KeyData) {
+        if key_data.vk_code == VK_ESCAPE {
             self.keychain.clear();
-        } else if vk_code == VK_BACK {
+        } else if key_data.vk_code == VK_BACK {
             self.keychain.back();
         } else {
-            let key_name = Keychain::get_key_name(scan_code);
+            let key_name = Keychain::get_key_name(&key_data);
             let size = self.measure_text(&key_name);
             self.keychain.add(Key {
+                key_data,
                 name: key_name,
-                vk: KeyRef(vk_code.0),
                 text_size: Size {
                     width: size.cx,
                     height: size.cy,
@@ -294,16 +294,14 @@ impl Window {
                 if is_repeat {
                     return LRESULT(0);
                 }
-
                 let mut scan_code = ((lparam.0 >> 16) & 0xFF) as u32;
                 let is_extended = lparam.0 & (1 << 24) != 0;
                 if is_extended {
                     scan_code |= 0x100;
                 }
                 let vk_code = scancode_to_vk(scan_code, VIRTUAL_KEY(wparam.0 as u16), is_extended);
-
-                // GetKeyNameText expects the scan code in the upper 16 bits.
-                self.handle_key(scan_code, vk_code);
+                let key_data = KeyData { scan_code, vk_code };
+                self.handle_key(key_data);
                 LRESULT(0)
             }
             _ => DefWindowProcW(self.handle, message, wparam, lparam),
