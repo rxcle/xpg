@@ -1,6 +1,6 @@
 #![allow(unused_must_use)]
 
-use std::ffi::{c_void, CStr, OsStr};
+use std::ffi::c_void;
 
 use windows::{
     core::{w, Result, HSTRING, PCWSTR},
@@ -8,18 +8,16 @@ use windows::{
         Foundation::*,
         Graphics::{
             Dwm::{
-                DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_SYSTEMBACKDROP_TYPE,
-                DWMWA_USE_HOSTBACKDROPBRUSH, DWMWA_VISIBLE_FRAME_BORDER_THICKNESS,
-                DWMWA_WINDOW_CORNER_PREFERENCE, DWMWINDOWATTRIBUTE, DWM_WINDOW_CORNER_PREFERENCE,
+                DwmSetWindowAttribute, DWMWA_USE_HOSTBACKDROPBRUSH, DWMWA_WINDOW_CORNER_PREFERENCE,
+                DWM_WINDOW_CORNER_PREFERENCE,
             },
             Gdi::{
                 BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
-                CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, EndPaint, FillRect, GetDC,
-                GetTextExtentPoint32A, GetTextExtentPoint32W, InvalidateRect, RedrawWindow,
-                ReleaseDC, SelectObject, SetBkMode, SetTextColor, TextOutW, UpdateWindow,
-                CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER, DT_SINGLELINE,
-                DT_VCENTER, HBRUSH, HDC, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
-                RDW_INVALIDATE, RDW_UPDATENOW, SRCCOPY, TRANSPARENT,
+                CreateSolidBrush, DeleteDC, DeleteObject, EndPaint, FillRect, GetDC,
+                GetTextExtentPoint32W, InvalidateRect, ReleaseDC, SelectObject, SetBkMode,
+                SetTextColor, TextOutW, UpdateWindow, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET,
+                DEFAULT_QUALITY, HBRUSH, HDC, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
+                SRCCOPY, TRANSPARENT,
             },
         },
         System::LibraryLoader::GetModuleHandleW,
@@ -29,7 +27,7 @@ use windows::{
 
 use crate::{
     helpers::to_lpcwstr,
-    keys::{Key, Keychain, ScanCode, Size, SC_BACK, SC_ESCAPE},
+    keys::{Keychain, ScanCode, SC_BACK, SC_ESCAPE},
 };
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("rxcle.skproto.wc");
@@ -179,8 +177,11 @@ impl Window {
 
         let mut x = 0;
         for key in &self.keychain.keys {
-            TextOutW(mem_dc, x, 0, &to_lpcwstr(&key.name));
-            x += key.text_size.width + 5;
+            self.keychain.key_infos.get(key).map_or((), |key| {
+                let text_size = self.measure_text(&key.name);
+                TextOutW(mem_dc, x, 0, &to_lpcwstr(&key.name));
+                x += text_size.cx + 5;
+            });
         }
 
         BitBlt(hdc, 0, 0, width, height, Some(mem_dc), 0, 0, SRCCOPY);
@@ -247,16 +248,7 @@ impl Window {
         } else if scan_code == SC_BACK {
             self.keychain.back();
         } else {
-            let key_name = Keychain::get_key_name(&scan_code);
-            let size = self.measure_text(&key_name);
-            self.keychain.add(Key {
-                scan_code,
-                name: key_name,
-                text_size: Size {
-                    width: size.cx,
-                    height: size.cy,
-                },
-            });
+            self.keychain.add(scan_code);
         }
         self.refresh();
     }

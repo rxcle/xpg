@@ -1,73 +1,37 @@
 use std::collections::HashMap;
 
 use std::ffi::CStr;
-use std::hash::Hash;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyNameTextA;
 
-#[derive(Eq, PartialEq, Debug, Copy, Clone, Hash)]
-pub struct KeyRef(pub u16);
-
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub struct ScanCode(pub i32);
 pub const SC_ESCAPE: ScanCode = ScanCode(0x01);
 pub const SC_BACK: ScanCode = ScanCode(0x0E);
 
-#[derive(Clone, Copy)]
-pub struct Size {
-    pub width: i32,
-    pub height: i32,
-}
-
-#[derive(Clone)]
-pub struct Key {
-    pub scan_code: ScanCode,
-    pub name: String,
-    pub text_size: Size,
-}
-
 pub struct KeyInfo {
-    pub vk: KeyRef,
     pub name: String,
-    pub text_size: Size,
-    pub is_dirty: bool,
 }
 
 pub struct Keychain {
-    pub keys: Vec<Key>,
-    pub key_info: HashMap<KeyRef, KeyInfo>,
+    pub keys: Vec<ScanCode>,
+    pub key_infos: HashMap<ScanCode, KeyInfo>,
 }
 
 impl Keychain {
     pub fn new() -> Self {
         Self {
             keys: vec![],
-            key_info: HashMap::new(),
+            key_infos: HashMap::new(),
         }
     }
 
-    pub fn add(&mut self, key: Key) {
-        // let key_info = self.key_info.get(&key.vk);
-        // if key_info.is_none() {
-        //     self.key_info.insert(
-        //         key.vk,
-        //         KeyInfo {
-        //             vk: key.vk,
-        //             name: key.name,
-        //             text_size: key.text_size,
-        //             is_dirty: false,
-        //         },
-        //     );
-        // }
-        self.keys.push(Key {
-            name: key.name,
-            scan_code: key.scan_code,
-            text_size: Size {
-                width: key.text_size.width,
-                height: key.text_size.height,
-            },
+    pub fn add(&mut self, scan_code: ScanCode) {
+        self.key_infos.entry(scan_code).or_insert_with(|| KeyInfo {
+            name: Keychain::get_key_name(&scan_code),
         });
+        self.keys.push(scan_code);
     }
 
     pub fn back(&mut self) {
