@@ -1,8 +1,7 @@
-use std::collections::HashMap;
+use std::os::windows::ffi::OsStringExt;
+use std::{collections::HashMap, ffi::OsString};
 
-use std::ffi::CStr;
-
-use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyNameTextA;
+use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyNameTextW;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
@@ -48,15 +47,14 @@ impl Keychain {
 
     pub fn get_key_name(scan_code: &ScanCode) -> String {
         let lparam_for_key_name = (scan_code.0 << 16) as i32;
-        let mut key_name_buf = [0u8; 128];
-        let ret = unsafe { GetKeyNameTextA(lparam_for_key_name, &mut key_name_buf) };
+        let mut buf = [0u16; 256];
+        let ret = unsafe { GetKeyNameTextW(lparam_for_key_name, &mut buf) };
         if ret > 0 {
-            if let Ok(cstr) = CStr::from_bytes_with_nul(&key_name_buf[..ret as usize + 1]) {
-                if let Ok(key_name) = cstr.to_str() {
-                    return key_name.to_string();
-                }
-            }
+            OsString::from_wide(&buf[..ret as usize])
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            String::default()
         }
-        return String::default();
     }
 }
