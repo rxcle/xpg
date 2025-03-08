@@ -1,6 +1,6 @@
 #![allow(unused_must_use)]
 
-use std::ffi::c_void;
+use std::{collections::HashMap, ffi::c_void};
 
 use windows::{
     core::{w, Result, HSTRING, PCWSTR},
@@ -44,6 +44,7 @@ pub struct Window {
     window_active: bool,
     client_rect: RECT,
     keychain: Keychain,
+    key_render_sizes: HashMap<ScanCode, SIZE>,
 }
 
 impl Window {
@@ -76,6 +77,7 @@ impl Window {
                     bottom: WIN_HEIGHT,
                 },
                 keychain: Keychain::new(),
+                key_render_sizes: HashMap::new(),
             });
 
             let hinstance: HINSTANCE = instance.into();
@@ -177,11 +179,17 @@ impl Window {
 
         let mut x = 0;
         for key in &self.keychain.keys {
-            self.keychain.key_infos.get(key).map_or((), |key| {
-                let text_size = self.measure_text(&key.name);
-                TextOutW(mem_dc, x, 0, &to_lpcwstr(&key.name));
-                x += text_size.cx + 5;
-            });
+            self.keychain
+                .key_infos
+                .get(&key.scan_code)
+                .map_or((), |key_info| {
+                    let text_size = self
+                        .key_render_sizes
+                        .get(&key.scan_code)
+                        .map_or_else(|| self.measure_text(&key_info.name), |text_size| *text_size);
+                    TextOutW(mem_dc, x, 0, &to_lpcwstr(&key_info.name));
+                    x += text_size.cx + 5;
+                });
         }
 
         BitBlt(hdc, 0, 0, width, height, Some(mem_dc), 0, 0, SRCCOPY);

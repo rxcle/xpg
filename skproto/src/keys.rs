@@ -15,8 +15,12 @@ pub struct KeyInfo {
 }
 
 pub struct Keychain {
-    pub keys: Vec<ScanCode>,
+    pub keys: Vec<Key>,
     pub key_infos: HashMap<ScanCode, KeyInfo>,
+}
+
+pub struct Key {
+    pub scan_code: ScanCode,
 }
 
 impl Keychain {
@@ -31,7 +35,7 @@ impl Keychain {
         self.key_infos.entry(scan_code).or_insert_with(|| KeyInfo {
             name: Keychain::get_key_name(&scan_code),
         });
-        self.keys.push(scan_code);
+        self.keys.push(Key { scan_code });
     }
 
     pub fn back(&mut self) {
