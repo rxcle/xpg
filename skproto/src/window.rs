@@ -13,11 +13,11 @@ use windows::{
             },
             Gdi::{
                 BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
-                CreateSolidBrush, DeleteDC, DeleteObject, EndPaint, FillRect, GetDC,
+                CreateSolidBrush, DeleteDC, DeleteObject, EndPaint, FillRect, GetDC, GetDeviceCaps,
                 GetTextExtentPoint32W, InvalidateRect, ReleaseDC, SelectObject, SetBkMode,
                 SetTextColor, TextOutW, UpdateWindow, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET,
-                DEFAULT_QUALITY, HBRUSH, HDC, HFONT, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
-                SRCCOPY, TRANSPARENT,
+                DEFAULT_QUALITY, FW_MEDIUM, HBRUSH, HDC, HFONT, HGDIOBJ, LOGPIXELSY,
+                OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, TRANSPARENT,
             },
         },
         System::LibraryLoader::GetModuleHandleW,
@@ -29,7 +29,7 @@ use windows::{
 };
 
 use crate::{
-    helpers::to_lpcwstr,
+    helpers::{mul_div_round, to_lpcwstr},
     keys::{Keychain, ScanCode, SC_BACK, SC_ESCAPE},
 };
 
@@ -125,12 +125,15 @@ impl Window {
 
     unsafe fn init_window(&mut self, window: HWND) {
         self.handle = window;
+        let dc = GetDC(Some(window));
+        let font_size = -mul_div_round(12, GetDeviceCaps(Some(dc), LOGPIXELSY), 72);
+        ReleaseDC(Some(window), dc);
         self.font = CreateFontW(
-            20,
+            font_size,
             0,
             0,
             0,
-            700i32,
+            FW_MEDIUM.0 as i32,
             0,
             0,
             0,
@@ -139,7 +142,7 @@ impl Window {
             CLIP_DEFAULT_PRECIS,
             DEFAULT_QUALITY,
             0,
-            w!("Segoe UI Symbol"),
+            w!("Consolas"),
         );
         self.fgbrush = CreateSolidBrush(COLORREF(0x00FFFFFF));
         self.fgactive_brush = CreateSolidBrush(COLORREF(0x00D7792B));
@@ -174,7 +177,7 @@ impl Window {
             bottom: self.client_rect.bottom,
         };
 
-        FillRect(mem_dc, &rect, bg);
+        //FillRect(mem_dc, &rect, bg);
 
         SelectObject(mem_dc, HGDIOBJ::from(self.font));
         SetTextColor(mem_dc, fg);
@@ -190,8 +193,17 @@ impl Window {
                         .key_render_sizes
                         .get(&key.scan_code)
                         .map_or_else(|| self.measure_text(&key_info.name), |text_size| *text_size);
-                    TextOutW(mem_dc, x, 0, &to_lpcwstr(&key_info.name));
-                    x += text_size.cx + 5;
+
+                    let rect = RECT {
+                        left: x,
+                        top: self.client_rect.top,
+                        right: x + text_size.cx + 10,
+                        bottom: self.client_rect.bottom,
+                    };
+
+                    FillRect(mem_dc, &rect, bg);
+                    TextOutW(mem_dc, x + 5, 0, &to_lpcwstr(&key_info.name));
+                    x += text_size.cx + 15;
                 });
         }
 
@@ -305,6 +317,8 @@ impl Window {
                     raw_scan_code
                 };
 
+                println!("{:08X}", lparam.0);
+                println!("{:b}", lparam.0);
                 self.handle_key(ScanCode(scan_code));
                 LRESULT(0)
             }
