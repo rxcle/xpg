@@ -21,7 +21,10 @@ use windows::{
             },
         },
         System::LibraryLoader::GetModuleHandleW,
-        UI::WindowsAndMessaging::*,
+        UI::{
+            Input::KeyboardAndMouse::{MapVirtualKeyW, MAPVK_VK_TO_VSC_EX},
+            WindowsAndMessaging::*,
+        },
     },
 };
 
@@ -289,11 +292,19 @@ impl Window {
                 if is_repeat {
                     return LRESULT(0);
                 }
-                let is_extended = lparam.0 & (1 << 24) != 0;
-                let mut scan_code = ((lparam.0 >> 16) & 0xFF) as i32;
-                if is_extended {
-                    scan_code |= 0x100;
-                }
+
+                let raw_scan_code = ((lparam.0 >> 16) & 0xFF) as i32;
+
+                let scan_code = if raw_scan_code == 0 {
+                    // Media keys only generate a VK, not a scan code
+                    MapVirtualKeyW(wparam.0 as u32, MAPVK_VK_TO_VSC_EX) as i32
+                } else if lparam.0 & (1 << 24) != 0 {
+                    // Extended key (Right Alt, Right Ctrl, ...)
+                    raw_scan_code | 0x100
+                } else {
+                    raw_scan_code
+                };
+
                 self.handle_key(ScanCode(scan_code));
                 LRESULT(0)
             }
