@@ -6,19 +6,13 @@ use windows::{
     core::{w, Result, HSTRING, PCWSTR},
     Win32::{
         Foundation::*,
-        Graphics::{
-            Dwm::{
-                DwmSetWindowAttribute, DWMWA_USE_HOSTBACKDROPBRUSH, DWMWA_WINDOW_CORNER_PREFERENCE,
-                DWM_WINDOW_CORNER_PREFERENCE,
-            },
-            Gdi::{
-                BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
-                CreateSolidBrush, DeleteDC, DeleteObject, EndPaint, FillRect, GetDC, GetDeviceCaps,
-                GetTextExtentPoint32W, InvalidateRect, ReleaseDC, SelectObject, SetBkMode,
-                SetTextColor, TextOutW, UpdateWindow, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET,
-                DEFAULT_QUALITY, FW_MEDIUM, HBRUSH, HDC, HFONT, HGDIOBJ, LOGPIXELSY,
-                OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, TRANSPARENT,
-            },
+        Graphics::Gdi::{
+            BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW,
+            CreateSolidBrush, DeleteDC, DeleteObject, EndPaint, FillRect, GetDC, GetDeviceCaps,
+            GetTextExtentPoint32W, InvalidateRect, ReleaseDC, SelectObject, SetBkMode,
+            SetTextColor, TextOutW, UpdateWindow, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET,
+            DEFAULT_QUALITY, FW_MEDIUM, HBRUSH, HDC, HFONT, HGDIOBJ, LOGPIXELSY,
+            OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, TRANSPARENT,
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::{
@@ -34,6 +28,7 @@ use crate::{
 };
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("rxcle.skproto.wc");
+const COLOR_KEY: COLORREF = COLORREF(0x00FF00FF);
 
 const WIN_WIDTH: i32 = 200;
 const WIN_HEIGHT: i32 = 25;
@@ -44,6 +39,7 @@ pub struct Window {
     fgbrush: HBRUSH,
     fgactive_brush: HBRUSH,
     fgstopped_brush: HBRUSH,
+    transparent_brush: HBRUSH,
     window_active: bool,
     client_rect: RECT,
     keychain: Keychain,
@@ -72,6 +68,7 @@ impl Window {
                 fgbrush: HBRUSH::default(),
                 fgactive_brush: HBRUSH::default(),
                 fgstopped_brush: HBRUSH::default(),
+                transparent_brush: HBRUSH::default(),
                 window_active: false,
                 client_rect: RECT {
                     left: 0,
@@ -85,7 +82,7 @@ impl Window {
 
             let hinstance: HINSTANCE = instance.into();
             let handle = CreateWindowExW(
-                WS_EX_APPWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_COMPOSITED,
+                WS_EX_APPWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT,
                 WINDOW_CLASS_NAME,
                 &HSTRING::from(title),
                 WS_VISIBLE | WS_POPUP,
@@ -99,23 +96,7 @@ impl Window {
                 Some(window.as_mut() as *mut _ as _),
             )?;
 
-            SetLayeredWindowAttributes(handle, COLORREF::default(), 220, LWA_ALPHA);
-
-            let preference = DWM_WINDOW_CORNER_PREFERENCE(3);
-            DwmSetWindowAttribute(
-                handle,
-                DWMWA_WINDOW_CORNER_PREFERENCE,
-                &preference as *const _ as *const c_void,
-                std::mem::size_of::<u32>() as u32,
-            );
-
-            let enable = 1;
-            DwmSetWindowAttribute(
-                handle,
-                DWMWA_USE_HOSTBACKDROPBRUSH,
-                &enable as *const _ as *const c_void,
-                std::mem::size_of::<u32>() as u32,
-            );
+            SetLayeredWindowAttributes(handle, COLOR_KEY, 220, LWA_ALPHA | LWA_COLORKEY);
 
             window.reset();
 
@@ -147,6 +128,7 @@ impl Window {
         self.fgbrush = CreateSolidBrush(COLORREF(0x00FFFFFF));
         self.fgactive_brush = CreateSolidBrush(COLORREF(0x00D7792B));
         self.fgstopped_brush = CreateSolidBrush(COLORREF(0x002B31D7));
+        self.transparent_brush = CreateSolidBrush(COLOR_KEY);
     }
 
     unsafe fn destroy_window(&mut self) {
@@ -158,6 +140,8 @@ impl Window {
         self.fgbrush = HBRUSH::default();
         DeleteObject(HGDIOBJ::from(self.fgactive_brush));
         self.fgactive_brush = HBRUSH::default();
+        DeleteObject(HGDIOBJ::from(self.transparent_brush));
+        self.transparent_brush = HBRUSH::default();
     }
 
     unsafe fn paint(&mut self, hdc: HDC) {
@@ -177,7 +161,7 @@ impl Window {
             bottom: self.client_rect.bottom,
         };
 
-        //FillRect(mem_dc, &rect, bg);
+        FillRect(mem_dc, &rect, self.transparent_brush);
 
         SelectObject(mem_dc, HGDIOBJ::from(self.font));
         SetTextColor(mem_dc, fg);
@@ -233,7 +217,7 @@ impl Window {
             self.handle,
             None,
             window_rect.right - WIN_WIDTH - 5,
-            50, // window_rect.bottom - WIN_HEIGHT - 5,
+            0, // window_rect.bottom - WIN_HEIGHT - 5,
             0,
             0,
             SWP_NOSIZE,
