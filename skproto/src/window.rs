@@ -15,15 +15,12 @@ use windows::{
             OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, TRANSPARENT,
         },
         System::LibraryLoader::GetModuleHandleW,
-        UI::{
-            Input::KeyboardAndMouse::{MapVirtualKeyW, MAPVK_VK_TO_VSC_EX},
-            WindowsAndMessaging::*,
-        },
+        UI::WindowsAndMessaging::*,
     },
 };
 
 use crate::{
-    helpers::{mul_div_round, to_lpcwstr},
+    helpers::{determine_key_pressed, mul_div_round, to_lpcwstr},
     keys::{Keychain, ScanCode, SC_BACK, SC_ESCAPE},
 };
 
@@ -131,16 +128,18 @@ impl Window {
         self.transparent_brush = CreateSolidBrush(COLOR_KEY);
     }
 
-    unsafe fn destroy_window(&mut self) {
-        PostQuitMessage(0);
+    fn destroy_window(&mut self) {
+        unsafe {
+            PostQuitMessage(0);
+            DeleteObject(HGDIOBJ::from(self.font));
+            DeleteObject(HGDIOBJ::from(self.fgbrush));
+            DeleteObject(HGDIOBJ::from(self.fgactive_brush));
+            DeleteObject(HGDIOBJ::from(self.transparent_brush));
+        }
         self.handle = HWND::default();
-        DeleteObject(HGDIOBJ::from(self.font));
         self.font = HFONT::default();
-        DeleteObject(HGDIOBJ::from(self.fgbrush));
         self.fgbrush = HBRUSH::default();
-        DeleteObject(HGDIOBJ::from(self.fgactive_brush));
         self.fgactive_brush = HBRUSH::default();
-        DeleteObject(HGDIOBJ::from(self.transparent_brush));
         self.transparent_brush = HBRUSH::default();
     }
 
@@ -284,26 +283,9 @@ impl Window {
                 LRESULT(0)
             }
             WM_KEYDOWN | WM_SYSKEYDOWN => {
-                let is_repeat = ((lparam.0 >> 30) & 1) != 0;
-                if is_repeat {
-                    return LRESULT(0);
+                if let Some(scan_code) = determine_key_pressed(wparam, lparam) {
+                    self.handle_key(scan_code);
                 }
-
-                let raw_scan_code = ((lparam.0 >> 16) & 0xFF) as i32;
-
-                let scan_code = if raw_scan_code == 0 {
-                    // Media keys only generate a VK, not a scan code
-                    MapVirtualKeyW(wparam.0 as u32, MAPVK_VK_TO_VSC_EX) as i32
-                } else if lparam.0 & (1 << 24) != 0 {
-                    // Extended key (Right Alt, Right Ctrl, ...)
-                    raw_scan_code | 0x100
-                } else {
-                    raw_scan_code
-                };
-
-                println!("{:08X}", lparam.0);
-                println!("{:b}", lparam.0);
-                self.handle_key(ScanCode(scan_code));
                 LRESULT(0)
             }
             _ => DefWindowProcW(self.handle, message, wparam, lparam),
