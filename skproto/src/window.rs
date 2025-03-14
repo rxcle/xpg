@@ -20,7 +20,7 @@ use windows::{
 };
 
 use crate::{
-    helpers::{determine_key_pressed, mul_div_round, to_lpcwstr},
+    helpers::{determine_key_pressed, hiword, loword, mul_div_round, to_lpcwstr},
     keys::{Keychain, ScanCode, SC_BACK, SC_ESCAPE},
 };
 
@@ -38,7 +38,7 @@ pub struct Window {
     fgstopped_brush: HBRUSH,
     transparent_brush: HBRUSH,
     window_active: bool,
-    client_rect: RECT,
+    size: SIZE,
     keychain: Keychain,
     key_render_sizes: HashMap<ScanCode, SIZE>,
 }
@@ -67,11 +67,9 @@ impl Window {
                 fgstopped_brush: HBRUSH::default(),
                 transparent_brush: HBRUSH::default(),
                 window_active: false,
-                client_rect: RECT {
-                    left: 0,
-                    top: 0,
-                    right: WIN_WIDTH,
-                    bottom: WIN_HEIGHT,
+                size: SIZE {
+                    cx: WIN_WIDTH,
+                    cy: WIN_HEIGHT,
                 },
                 keychain: Keychain::new(),
                 key_render_sizes: HashMap::new(),
@@ -144,8 +142,8 @@ impl Window {
     }
 
     unsafe fn paint(&mut self, hdc: HDC) {
-        let width = self.client_rect.right - self.client_rect.left;
-        let height = self.client_rect.bottom - self.client_rect.top;
+        let width = self.size.cx;
+        let height = self.size.cy;
 
         let mem_dc = CreateCompatibleDC(Some(hdc));
         let mem_bitmap = CreateCompatibleBitmap(hdc, width, height);
@@ -154,10 +152,10 @@ impl Window {
         let (bg, fg) = (self.fgactive_brush, COLORREF(0x00FFFFFF));
 
         let rect = RECT {
-            left: self.client_rect.left,
-            top: self.client_rect.top,
-            right: self.client_rect.right,
-            bottom: self.client_rect.bottom,
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: height,
         };
 
         FillRect(mem_dc, &rect, self.transparent_brush);
@@ -179,9 +177,9 @@ impl Window {
 
                     let rect = RECT {
                         left: x,
-                        top: self.client_rect.top,
+                        top: 0,
                         right: x + text_size.cx + 10,
-                        bottom: self.client_rect.bottom,
+                        bottom: self.size.cy,
                     };
 
                     FillRect(mem_dc, &rect, bg);
@@ -230,9 +228,32 @@ impl Window {
 
     fn refresh(&mut self) {
         unsafe {
+            let required_size = self.determine_required_size();
+
+            let mut screen_rect = RECT::default();
+            SystemParametersInfoW(
+                SPI_GETWORKAREA,
+                0,
+                Some(&mut screen_rect as *mut _ as *mut c_void),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            );
+
+            SetWindowPos(
+                self.handle,
+                None,
+                screen_rect.left + ((screen_rect.right - screen_rect.left) - required_size.cx) / 2,
+                0,
+                required_size.cx,
+                required_size.cy,
+                SWP_NOZORDER,
+            );
             InvalidateRect(Some(self.handle), None, false);
             UpdateWindow(self.handle);
         }
+    }
+
+    fn determine_required_size(&mut self) -> SIZE {
+        SIZE { cx: 300, cy: 200 }
     }
 
     fn measure_text(&self, text: &str) -> SIZE {
@@ -271,6 +292,13 @@ impl Window {
             }
             WM_ACTIVATE => {
                 self.activate_window(wparam.0 > 0);
+                LRESULT(0)
+            }
+            WM_SIZE => {
+                self.size = SIZE {
+                    cx: loword(lparam.0),
+                    cy: hiword(lparam.0),
+                };
                 LRESULT(0)
             }
             WM_ERASEBKGND => LRESULT(1),

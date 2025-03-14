@@ -7,6 +7,14 @@ use windows::Win32::{
 
 use crate::keys::ScanCode;
 
+pub const fn loword(value: isize) -> i32 {
+    (value & 0xFFFF) as i32
+}
+
+pub const fn hiword(value: isize) -> i32 {
+    ((value >> 16) & 0xFFFF) as i32
+}
+
 pub fn to_lpcwstr(s: &str) -> Vec<u16> {
     OsStr::new(s).encode_wide().collect()
 }
